@@ -56,9 +56,9 @@ class TableInfo:
 
     name: str
 
-    columns: List[ColumnInfo] = field(default_factory=list)
+    columns: List[ColumnInfo] = field(default_factory=lambda: [])
 
-    foreign_keys: List[ForeignKeyInfo] = field(default_factory=list)
+    foreign_keys: List[ForeignKeyInfo] = field(default_factory=lambda: [])
 
     primary_key: Optional[str] = None
 
@@ -86,7 +86,7 @@ class SchemaManager:
 
     # ----------------------------------------------
 
-    def load(self):
+    def load(self) -> None:
 
         """
         Read every table.
@@ -152,19 +152,19 @@ class SchemaManager:
 
     # ----------------------------------------------
 
-    def get_table(self, name):
+    def get_table(self, name: str) -> TableInfo:
 
         return self.tables[name]
 
     # ----------------------------------------------
 
-    def get_tables(self):
+    def get_tables(self) -> List[TableInfo]:
 
         return list(self.tables.values())
 
     # ----------------------------------------------
 
-    def column(self, table, column):
+    def column(self, table: str, column: str) -> Optional[ColumnInfo]:
 
         for c in self.tables[table].columns:
 
@@ -176,19 +176,19 @@ class SchemaManager:
 
     # ----------------------------------------------
 
-    def primary_key(self, table):
+    def primary_key(self, table: str) -> Optional[str]:
 
         return self.tables[table].primary_key
 
     # ----------------------------------------------
 
-    def relationships(self, table):
+    def relationships(self, table: str) -> List[ForeignKeyInfo]:
 
         return self.tables[table].foreign_keys
 
     # ----------------------------------------------
 
-    def dump(self):
+    def dump(self) -> None:
 
         """
         Print schema to console.
