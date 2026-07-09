@@ -9,6 +9,8 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDateEdit,
+    QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -17,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -89,7 +92,7 @@ class MainWindow(QMainWindow):
         self.current_row: dict[str, Any] | None = None
         self.column_names: list[str] = []
         self.column_types: dict[str, str] = {}
-        self.form_fields: dict[str, QLineEdit] = {}
+        self.form_fields: dict[str, QWidget] = {}
         self.table_rows: list[dict[str, Any]] = []
 
         self.setWindowTitle(f"{config.APP_NAME} v{config.APP_VERSION}")
@@ -116,13 +119,17 @@ class MainWindow(QMainWindow):
         self.clear_button = QPushButton("Clear")
         self.clear_button.clicked.connect(self.clear_form)
 
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search rows")
+        self.search_box.textChanged.connect(self.filter_rows)
+
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
 
         self.table_widget = QTableWidget()
-        self.table_widget.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table_widget.setSelectionMode(QTableWidget.SingleSelection)
-        self.table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table_widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table_widget.itemSelectionChanged.connect(self.on_row_selected)
 
         self.form_group = QGroupBox("Record details")
@@ -132,6 +139,8 @@ class MainWindow(QMainWindow):
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(QLabel("Table"))
         controls_layout.addWidget(self.table_combo, 1)
+        controls_layout.addWidget(QLabel("Search"))
+        controls_layout.addWidget(self.search_box, 1)
         controls_layout.addWidget(self.refresh_button)
         controls_layout.addWidget(self.new_button)
         controls_layout.addWidget(self.save_button)
@@ -170,7 +179,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Database error", str(info["message"]))
             return
 
-        if self.current_table not in self.table_combo.allItems() if hasattr(self.table_combo, "allItems") else False:
+        if self.current_table and self.table_combo.count() > 0 and self.current_table not in [self.table_combo.itemText(index) for index in range(self.table_combo.count())]:
             self.current_table = ""
 
         if self.current_table:
@@ -227,9 +236,35 @@ class MainWindow(QMainWindow):
 
         self.form_fields = {}
         for column_name in self.column_names:
-            field = QLineEdit()
+            column_type = self.column_types.get(column_name, "")
+            normalized = column_type.lower()
+            if "date" in normalized or "datetime" in normalized:
+                field = QDateEdit()
+                field.setCalendarPopup(True)
+            elif "int" in normalized:
+                field = QSpinBox()
+                field.setMinimum(-10_000_000)
+                field.setMaximum(10_000_000)
+            elif "real" in normalized or "float" in normalized or "double" in normalized or "numeric" in normalized:
+                field = QDoubleSpinBox()
+                field.setDecimals(2)
+                field.setMinimum(-10_000_000)
+                field.setMaximum(10_000_000)
+            else:
+                field = QLineEdit()
+
             self.form_fields[column_name] = field
-            self.form_layout.addRow(column_name, field)
+            self.form_layout.addRow(self._field_label(column_name), field)
+
+    def _field_label(self, column_name: str) -> str:
+        normalized = column_name.lower()
+        if "title" in normalized:
+            return "Title"
+        if "name" in normalized:
+            return "Name"
+        if "date" in normalized:
+            return "Date"
+        return column_name
 
     def on_row_selected(self) -> None:
         selected_rows = self.table_widget.selectionModel().selectedRows()
@@ -246,16 +281,36 @@ class MainWindow(QMainWindow):
     def _populate_form_from_row(self, row: dict[str, Any]) -> None:
         for column_name, field in self.form_fields.items():
             value = row.get(column_name)
-            field.setText("" if value is None else str(value))
+            if isinstance(field, QDateEdit):
+                if value is None:
+                    field.clear()
+                else:
+                    field.setDate(value)
+            elif isinstance(field, (QSpinBox, QDoubleSpinBox)):
+                if value in (None, ""):
+                    field.setValue(0)
+                else:
+                    if isinstance(field, QDoubleSpinBox):
+                        field.setValue(float(value))
+                    else:
+                        field.setValue(int(value))
+            elif isinstance(field, QLineEdit):
+                field.setText("" if value is None else str(value))
 
     def start_new_record(self) -> None:
         self.current_row = None
         self.clear_form()
+        self.message_label.setText("New row ready. Fill the fields and click Save.")
 
     def clear_form(self) -> None:
         self.current_row = None
         for field in self.form_fields.values():
-            field.clear()
+            if isinstance(field, QDateEdit):
+                field.clear()
+            elif isinstance(field, (QSpinBox, QDoubleSpinBox)):
+                field.setValue(0)
+            elif isinstance(field, QLineEdit):
+                field.clear()
 
     def save_record(self) -> None:
         if not self.current_table:
@@ -265,7 +320,17 @@ class MainWindow(QMainWindow):
             primary_key = self.db.primary_key(self.current_table)
             values = self._collect_form_values()
 
-            if self.current_row is None or primary_key is None or self.current_row.get(primary_key) in (None, ""):
+            if self.current_row is None or primary_key is None:
+                insert_columns = [name for name in self.column_names if name != primary_key]
+                if not insert_columns:
+                    self.db.execute(f"INSERT INTO [{self.current_table}] DEFAULT VALUES")
+                else:
+                    placeholders = ", ".join("?" for _ in insert_columns)
+                    columns_sql = ", ".join(f"[{name}]" for name in insert_columns)
+                    sql = f"INSERT INTO [{self.current_table}] ({columns_sql}) VALUES ({placeholders})"
+                    params = [values.get(name) for name in insert_columns]
+                    self.db.execute(sql, params)
+            elif self.current_row.get(primary_key) in (None, ""):
                 insert_columns = [name for name in self.column_names if name != primary_key]
                 if not insert_columns:
                     self.db.execute(f"INSERT INTO [{self.current_table}] DEFAULT VALUES")
@@ -284,7 +349,12 @@ class MainWindow(QMainWindow):
                 self.db.execute(sql, params)
 
             self.db.commit()
-            self.message_label.setText("Record saved.")
+            if self.current_row is None or primary_key is None:
+                self.message_label.setText("New row added.")
+            elif self.current_row.get(primary_key) in (None, ""):
+                self.message_label.setText("New row added.")
+            else:
+                self.message_label.setText("Record saved.")
             self.load_table_data(self.current_table)
         except (QueryError, ValueError, TypeError) as exc:
             self.message_label.setText(f"Save failed: {exc}")
@@ -311,21 +381,45 @@ class MainWindow(QMainWindow):
     def _collect_form_values(self) -> dict[str, Any]:
         values: dict[str, Any] = {}
         for column_name, field in self.form_fields.items():
-            raw_value = field.text().strip()
-            if not raw_value:
-                values[column_name] = None
-                continue
+            if isinstance(field, QDateEdit):
+                value = field.date().toString("yyyy-MM-dd") if field.date().isValid() else None
+                values[column_name] = value
+            elif isinstance(field, QSpinBox):
+                values[column_name] = field.value()
+            elif isinstance(field, QDoubleSpinBox):
+                values[column_name] = field.value()
+            elif isinstance(field, QLineEdit):
+                raw_value = field.text().strip()
+                if not raw_value:
+                    values[column_name] = None
+                    continue
 
-            column_type = self.column_types.get(column_name, "")
-            normalized = column_type.lower()
-            if "int" in normalized:
-                values[column_name] = int(raw_value)
-            elif "real" in normalized or "float" in normalized or "double" in normalized:
-                values[column_name] = float(raw_value)
-            else:
-                values[column_name] = raw_value
+                column_type = self.column_types.get(column_name, "")
+                normalized = column_type.lower()
+                if "int" in normalized:
+                    values[column_name] = int(raw_value)
+                elif "real" in normalized or "float" in normalized or "double" in normalized or "numeric" in normalized:
+                    values[column_name] = float(raw_value)
+                else:
+                    values[column_name] = raw_value
 
         return values
+
+    def filter_rows(self) -> None:
+        if not self.current_table:
+            return
+
+        search_text = self.search_box.text().strip().lower()
+        self.table_widget.clearSelection()
+
+        for row_index in range(self.table_widget.rowCount()):
+            row_matches = False
+            for column_index in range(self.table_widget.columnCount()):
+                item = self.table_widget.item(row_index, column_index)
+                if item is not None and search_text in item.text().lower():
+                    row_matches = True
+                    break
+            self.table_widget.setRowHidden(row_index, not row_matches if search_text else False)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.db.connected:
