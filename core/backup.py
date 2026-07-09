@@ -2,7 +2,6 @@
 Automatic database backup.
 """
 
-from pathlib import Path
 
 import shutil
 
