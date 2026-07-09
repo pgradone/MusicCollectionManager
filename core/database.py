@@ -34,7 +34,6 @@ from types import TracebackType
 from typing import Any
 from typing import Optional
 from typing import Sequence
-from typing import Type
 
 import config
 
@@ -94,7 +93,7 @@ class DatabaseManager:
     # Context manager
     # --------------------------------------------------
 
-    def __enter__(self):
+    def __enter__(self) -> "DatabaseManager":
 
         self.connect()
 
@@ -102,10 +101,12 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
-    def __exit__(self,
-                 exc_type, # type: ignore
-                 exc_val, # type: ignore
-                 exc_tb): # type: ignore
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType]
+    ) -> None:
 
         try:
             if exc_type is None:
@@ -119,7 +120,7 @@ class DatabaseManager:
     # Connection
     # --------------------------------------------------
 
-    def connect(self):
+    def connect(self) -> None:
 
         """
         Connect to SQLite.
@@ -169,17 +170,18 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
-    def disconnect(self):
+    def disconnect(self) -> None:
 
         """
         Close database.
         """
 
         if not self.connected:
-            assert self.cursor is not None
             return
 
-        self.connection.close() # type: ignore
+        assert self.connection is not None
+
+        self.connection.close()
 
         self.connected = False
 
@@ -187,23 +189,23 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
-    def commit(self):
+    def commit(self) -> None:
 
-        if self.connection:
+        if self.connection is not None:
 
             self.connection.commit()
 
     # --------------------------------------------------
 
-    def rollback(self):
+    def rollback(self) -> None:
 
-        if self.connection:
+        if self.connection is not None:
 
             self.connection.rollback()
 
     # --------------------------------------------------
 
-    def begin(self):
+    def begin(self) -> None:
 
         self.execute("BEGIN")
 
@@ -211,7 +213,7 @@ class DatabaseManager:
     # Internal helpers
     # --------------------------------------------------
 
-    def _timer(self):
+    def _timer(self) -> float:
 
         return time.perf_counter()
 
@@ -221,7 +223,7 @@ class DatabaseManager:
         self,
         sql: str,
         elapsed: float
-    ):
+    ) -> None:
 
         self.logger.debug(
             "%.3f ms | %s",
@@ -282,7 +284,7 @@ class DatabaseManager:
         self,
         sql: str,
         values: Sequence[Sequence[Any]]
-    ):
+    ) -> None:
 
         if not self.connected:
 
@@ -312,12 +314,12 @@ class DatabaseManager:
     def fetchone(
         self,
         sql: str,
-        parameters=None # type: ignore
-    ):
+        parameters: Sequence[Any] | None = None
+    ) -> Any | None:
 
         return self.execute(
             sql,
-            parameters # type: ignore
+            parameters
         ).fetchone()
 
     # --------------------------------------------------
@@ -325,12 +327,12 @@ class DatabaseManager:
     def fetchall(
         self,
         sql: str,
-        parameters=None # type: ignore
-    ):
+        parameters: Sequence[Any] | None = None
+    ) -> list[Any]:
 
         return self.execute(
             sql,
-            parameters # type: ignore
+            parameters
         ).fetchall()
     
     # --------------------------------------------------
@@ -349,13 +351,13 @@ class DatabaseManager:
         def __init__(self, db: "DatabaseManager"):
             self.db = db
 
-        def __enter__(self):
+        def __enter__(self) -> "DatabaseManager":
             self.db.begin()
             return self.db
 
         def __exit__(
             self,
-            exc_type: Optional[Type[BaseException]],
+            exc_type: Optional[type[BaseException]],
             exc_val: Optional[BaseException],
             exc_tb: Optional[TracebackType]
         ) -> bool:
@@ -370,7 +372,7 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
-    def transaction(self):
+    def transaction(self) -> "DatabaseManager._Transaction":
         """
         Returns a transaction context manager.
         """
@@ -386,7 +388,7 @@ class DatabaseManager:
         Return all user tables.
         """
 
-        rows = self.fetchall( # type: ignore
+        rows = self.fetchall(
             """
             SELECT name
             FROM sqlite_master
@@ -400,31 +402,31 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
-    def columns(self, table: str):
+    def columns(self, table: str) -> list[sqlite3.Row]:
 
-        return self.fetchall( # type: ignore
+        return self.fetchall(
             f"PRAGMA table_info([{table}])"
         )
 
     # --------------------------------------------------
 
-    def foreign_keys(self, table: str):
+    def foreign_keys(self, table: str) -> list[sqlite3.Row]:
 
-        return self.fetchall( # type: ignore
+        return self.fetchall(
             f"PRAGMA foreign_key_list([{table}])"
         )
 
     # --------------------------------------------------
 
-    def indexes(self, table: str):
+    def indexes(self, table: str) -> list[sqlite3.Row]:
 
-        return self.fetchall( # type: ignore
+        return self.fetchall(
             f"PRAGMA index_list([{table}])"
         )
 
     # --------------------------------------------------
 
-    def primary_key(self, table: str):
+    def primary_key(self, table: str) -> Optional[str]:
 
         for column in self.columns(table):
 
@@ -437,7 +439,7 @@ class DatabaseManager:
 
     def table_exists(self, table: str) -> bool:
 
-        row = self.fetchone( # type: ignore
+        row = self.fetchone(
             """
             SELECT name
             FROM sqlite_master
@@ -455,9 +457,11 @@ class DatabaseManager:
 
     def count(self, table: str) -> int:
 
-        row = self.fetchone( # type: ignore
+        row = self.fetchone(
             f"SELECT COUNT(*) AS total FROM [{table}]"
         )
+
+        assert row is not None
 
         return int(row["total"])
 
@@ -467,10 +471,10 @@ class DatabaseManager:
         self,
         table: str,
         pk_name: str,
-        value # type: ignore
+        value: Any
     ) -> bool:
 
-        row = self.fetchone( # type: ignore
+        row = self.fetchone(
             f"""
             SELECT 1
             FROM [{table}]
@@ -485,11 +489,13 @@ class DatabaseManager:
     # --------------------------------------------------
 
     @property
-    def last_insert_id(self):
+    def last_insert_id(self) -> int:
 
-        row = self.fetchone( # type: ignore
+        row = self.fetchone(
             "SELECT last_insert_rowid() AS id"
         )
+
+        assert row is not None
 
         return row["id"]
 
@@ -497,7 +503,7 @@ class DatabaseManager:
     # Maintenance
     # --------------------------------------------------
 
-    def vacuum(self):
+    def vacuum(self) -> None:
 
         self.logger.info("VACUUM")
 
@@ -505,17 +511,19 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
-    def integrity_check(self):
+    def integrity_check(self) -> Any:
 
-        row = self.fetchone( # type: ignore
+        row = self.fetchone(
             "PRAGMA integrity_check"
         )
+
+        assert row is not None
 
         return row[0]
 
     # --------------------------------------------------
 
-    def analyze(self):
+    def analyze(self) -> None:
 
         self.logger.info("ANALYZE")
 
@@ -526,38 +534,40 @@ class DatabaseManager:
     # --------------------------------------------------
 
     @property
-    def sqlite_version(self):
+    def sqlite_version(self) -> str:
 
-        row = self.fetchone( # type: ignore
+        row = self.fetchone(
             "SELECT sqlite_version() AS version"
         )
+
+        assert row is not None
 
         return row["version"]
 
     # --------------------------------------------------
 
     @property
-    def database_size(self):
+    def database_size(self) -> int:
 
         return self.database.stat().st_size
 
     # --------------------------------------------------
 
     @property
-    def database_name(self):
+    def database_name(self) -> str:
 
         return self.database.name
 
     # --------------------------------------------------
 
     @property
-    def database_path(self):
+    def database_path(self) -> str:
 
         return str(self.database)
 
     # --------------------------------------------------
 
-    def info(self) -> dict: # type: ignore
+    def info(self) -> dict[str, Any]:
         """
         Returns general information about the database.
         """
@@ -576,5 +586,5 @@ class DatabaseManager:
 
             "connected": self.connected
 
-        } # type: ignore
+        }
  
