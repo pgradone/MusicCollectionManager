@@ -1,0 +1,30 @@
+# === Python Bytecode & Cache ===
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# === Virtual Environments ===
+.venv/
+venv/
+ENV/
+env/
+pythonenv/
+
+# === IDEs and Editors ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === Operating System Files ===
+.DS_Store
+Thumbs.db
+
+# === Environment Variables / Secrets ===
+.env
+.env.local
+*.secret
