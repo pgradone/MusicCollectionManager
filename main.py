@@ -244,7 +244,15 @@ class MainWindow(QMainWindow):
 
         self.table_widget.resizeColumnsToContents()
         self.table_widget.clearSelection()
-        self.clear_form()
+
+        if self.table_rows:
+            self.current_row = self.table_rows[0]
+            self._populate_form_from_row(self.current_row)
+            self.table_widget.selectRow(0)
+        else:
+            self.current_row = None
+            self.clear_form()
+
         self._update_related_tabs()
 
     def _build_form_fields(self) -> None:
@@ -287,6 +295,14 @@ class MainWindow(QMainWindow):
         while self.related_tabs.count() > 0:
             self.related_tabs.removeTab(0)
 
+    def _related_relationships(self) -> list[tuple[str, str]]:
+        relationships: dict[str, list[tuple[str, str]]] = {
+            "Artists": [("Songs", "Sing")],
+            "Songs": [("Artists", "Sing"), ("Records", "Contain")],
+            "Records": [("Songs", "Contain")],
+        }
+        return relationships.get(self.current_table, [])
+
     def _update_related_tabs(self) -> None:
         self._clear_related_tabs()
 
@@ -297,30 +313,53 @@ class MainWindow(QMainWindow):
         if not primary_key:
             return
 
-        for table_name, fk in self.db.referenced_by(self.current_table):
-            child_widget = self._build_related_table_widget(table_name, fk, self.current_row[primary_key])
-            self.related_tabs.addTab(child_widget, table_name)
+        for title, relation_table in self._related_relationships():
+            fk = self._find_master_foreign_key(relation_table)
+            if fk is None:
+                continue
+
+            child_widget = self._build_related_table_widget(
+                relation_table,
+                title,
+                fk,
+                self.current_row[primary_key],
+            )
+            self.related_tabs.addTab(child_widget, title)
+
+    def _find_master_foreign_key(self, relation_table: str) -> sqlite3.Row | None:
+        for fk in self.db.foreign_keys(relation_table):
+            if fk["table"].upper() == self.current_table.upper():
+                return fk
+        return None
 
     def _build_related_table_widget(
         self,
-        table_name: str,
+        relation_table: str,
+        title: str,
         fk: sqlite3.Row,
         primary_value: Any,
     ) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        label = QLabel(
-            f"{table_name} rows related by [{fk['from']}] -> [{fk['table']}].[{fk['to']}]"
-        )
+        other_fk = [candidate for candidate in self.db.foreign_keys(relation_table) if candidate["from"] != fk["from"]][0]
+        target_table = other_fk["table"]
+        target_pk = self.db.primary_key(target_table)
+        columns = [column["name"] for column in self.db.columns(target_table)]
+
+        label = QLabel(f"{title} linked through {relation_table}")
         layout.addWidget(label)
 
         table = QTableWidget()
-        columns = [column['name'] for column in self.db.columns(table_name)]
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
 
-        query = f"SELECT {', '.join(f'[{name}]' for name in columns)} FROM [{table_name}] WHERE [{fk['from']}] = ?"
+        query = (
+            f"SELECT {', '.join(f'[{name}]' for name in columns)} "
+            f"FROM [{target_table}] "
+            f"INNER JOIN [{relation_table}] ON [{target_table}].[{target_pk}] = [{relation_table}].[{other_fk['from']}] "
+            f"WHERE [{relation_table}].[{fk['from']}] = ?"
+        )
         rows = self.db.fetchall(query, (primary_value,))
 
         table.setRowCount(len(rows))
@@ -334,59 +373,14 @@ class MainWindow(QMainWindow):
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
-        if self.db.is_association_table(table_name):
-            other_fk = [candidate for candidate in self.db.foreign_keys(table_name) if candidate["from"] != fk["from"]][0]
-            target_table = other_fk["table"]
-            columns = [column["name"] for column in self.db.columns(target_table)]
-            table.setColumnCount(len(columns))
-            table.setHorizontalHeaderLabels(columns)
-
-            query = (
-                f"SELECT {', '.join(f'[{name}]' for name in columns)} "
-                f"FROM [{target_table}] "
-                f"INNER JOIN [{table_name}] ON [{target_table}].[{self.db.primary_key(target_table)}] = [{table_name}].[{other_fk['from']}] "
-                f"WHERE [{table_name}].[{fk['from']}] = ?"
-            )
-            rows = self.db.fetchall(query, (primary_value,))
-
-            table.setRowCount(len(rows))
-            for row_index, row in enumerate(rows):
-                for column_index, column_name in enumerate(columns):
-                    value = row[column_name]
-                    text = "" if value is None else str(value)
-                    table.setItem(row_index, column_index, QTableWidgetItem(text))
-
-            table.resizeColumnsToContents()
-            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-            layout.addWidget(table)
-
-            add_button = QPushButton("Add relation")
-            delete_button = QPushButton("Delete relation")
-            add_button.clicked.connect(lambda _, t=table_name, fk=fk, pv=primary_value: self._open_association_editor(t, fk, pv))
-            delete_button.clicked.connect(lambda _, t=table_name, fk=fk, pv=primary_value: self._delete_association_relation(t, fk, pv, table))
-            button_layout = QHBoxLayout()
-            button_layout.addWidget(add_button)
-            button_layout.addWidget(delete_button)
-            layout.addLayout(button_layout)
-
-            return widget
-
-        table.setColumnCount(len(columns))
-        table.setHorizontalHeaderLabels(columns)
-
-        query = f"SELECT {', '.join(f'[{name}]' for name in columns)} FROM [{table_name}] WHERE [{fk['from']}] = ?"
-        rows = self.db.fetchall(query, (primary_value,))
-
-        table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            for column_index, column_name in enumerate(columns):
-                value = row[column_name]
-                text = "" if value is None else str(value)
-                table.setItem(row_index, column_index, QTableWidgetItem(text))
-
-        table.resizeColumnsToContents()
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(table)
+        add_button = QPushButton("Add relation")
+        delete_button = QPushButton("Delete relation")
+        add_button.clicked.connect(lambda _, t=relation_table, fk=fk, pv=primary_value, tw=table: self._open_association_editor(t, fk, pv, tw))
+        delete_button.clicked.connect(lambda _, t=relation_table, fk=fk, pv=primary_value, tw=table: self._delete_association_relation(t, fk, pv, tw))
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(add_button)
+        button_layout.addWidget(delete_button)
+        layout.addLayout(button_layout)
 
         return widget
 
@@ -395,6 +389,7 @@ class MainWindow(QMainWindow):
         association_table: str,
         fk: sqlite3.Row,
         primary_value: Any,
+        table_widget: QTableWidget | None = None,
     ) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Link {association_table}")

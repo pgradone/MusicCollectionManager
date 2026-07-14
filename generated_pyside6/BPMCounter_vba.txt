@@ -1,0 +1,41 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database
+Option Explicit
+Dim Timin As Date, Counter, Secs As Double
+Private Sub BPMVal_AfterUpdate()
+    ResetAll
+End Sub
+Private Sub Form_Load()
+    ResetAll
+End Sub
+
+Private Sub CommandReset_Click()
+    ResetAll
+End Sub
+
+Private Sub Form_Timer()
+    Secs = Format(Time - Timin, "s")
+    Me!Timing = Secs
+    Counter = Secs * Me!BPMVal / 60
+    Me!Count = Counter
+    Me.BR.Left = 500 + 2000 * (Counter - Int(Counter))
+End Sub
+
+Private Sub MinusOne_Click()
+    Me.BPMVal = Me.BPMVal - 1
+    DoCmd.RunCommand acCmdSave
+    ResetAll
+End Sub
+Private Sub PlusOne_Click()
+    Me.BPMVal = Me.BPMVal + 1
+    DoCmd.RunCommand acCmdSave
+    ResetAll
+End Sub
+Function ResetAll()
+    Me.BR.Left = 500
+    Counter = 0
+    Timin = Time
+End Function

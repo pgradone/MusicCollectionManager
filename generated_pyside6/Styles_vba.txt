@@ -1,0 +1,73 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database   'Use database order for string comparisons
+Private Sub ButtonAddStyle_Click()
+On Error GoTo Err_ButtonAddStyle_Click
+
+    NewIDMgt.AddNewID "StyleID", "FreeStyleIDs"
+
+    Dim MyFirstControl As String
+    MyFirstControl = "Label"
+
+    DoCmd.GoToControl MyFirstControl
+
+Exit_ButtonAddStyle_Click:
+    Exit Sub
+
+Err_ButtonAddStyle_Click:
+    MsgBox Error$
+    Resume Exit_ButtonAddStyle_Click
+
+End Sub
+Private Sub ButtonDeleteStyle_Click()
+On Error GoTo Err_ButtonDeleteStyle_Click
+
+
+    DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+
+Exit_ButtonDeleteStyle_Click:
+    Exit Sub
+
+Err_ButtonDeleteStyle_Click:
+    MsgBox Error$
+    Resume Exit_ButtonDeleteStyle_Click
+
+End Sub
+Private Sub Form_BeforeInsert(Cancel As Integer)
+    BuildNewID Me.Name, "StyleID"
+End Sub
+Private Sub MusicStyleCombo_AfterUpdate()
+   Dim Criteria As String     ' This is the argument to the FindFirst method.
+   Dim MyRS As Recordset      ' Recordset used to search.
+   Dim ActiveName As String  ' The name of the ActiveName to search for.
+   Dim Prompt As String, Message As String, CRLF As String
+   Const MB_ICONQUESTION = 32
+   Const YES = 6
+   Const YES_NO = 4
+   CRLF = Chr$(13)
+
+   Prompt = "Create new one?"
+   Set MyRS = Me.RecordsetClone
+
+   ' Build the criteria.
+   ActiveName = Screen.ActiveControl
+   Criteria = "[StyleID] = " & ActiveName
+   ' Perform the search.
+   MyRS.FindFirst Criteria
+
+   If MyRS.NoMatch Then
+      Message = ActiveName & " not found" & CRLF
+      If MsgBox(Message & Prompt, MB_ICONQUESTION & YES_NO, "Create new Style") = YES Then
+         DoCmd.GoToRecord , , A_NEWREC
+         Me![SongID] = Me!SongCombo
+         Me.Refresh
+      End If
+   Else
+      ' Synchronize the form's record to the dynaset's record.
+      Me.Bookmark = MyRS.Bookmark
+   End If
+
+End Sub

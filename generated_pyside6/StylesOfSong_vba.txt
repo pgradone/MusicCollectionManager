@@ -1,0 +1,81 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database   'Use database order for string comparisons
+
+Private Sub ButtonRemoveBelong_Click()
+On Error GoTo Err_ButtonRemoveBelong_Click
+
+  RelationsMgt.RemoveFromButton "Belong", Forms!Songs![SongID], Me![StyleID], "Title"
+
+Exit_ButtonRemoveBelong_Click:
+    Exit Sub
+
+Err_ButtonRemoveBelong_Click:
+    MsgBox Error$
+    Resume Exit_ButtonRemoveBelong_Click
+
+End Sub
+
+Private Sub StyleCombo_AfterUpdate()
+
+    RelationsMgt.AddFromCombo Forms!Songs![SongID], "Title", Me!StyleCombo, "SongID", "StyleID", "Songs", "Belong"
+
+End Sub
+
+Private Sub StyleCombo_NotInList(NewData As String, Response As Integer)
+    Dim ActiveID  As Integer, NewID As Integer, GetText As Variant
+    Dim Prompt As String, Message As String, CRLF As String, ActiveName As String
+    Dim MyQuery As String, MyID As String, MyFirstControl As String
+    Const MB_ICONQUESTION = 32
+    Const YES = 6
+    Const YES_NO = 4
+    CRLF = Chr$(13)
+    Prompt = "Create New Style?"
+    GetText = StyleCombo.Text
+    'Debug.Print GetText
+
+    Message = GetText & " not found" & CRLF
+    If MsgBox(Message & Prompt, MB_ICONQUESTION & YES_NO, "Create new?") = YES Then
+      DoCmd.OpenForm "Styles"
+
+      ' like ButtonAddStyle_Click
+
+      MyQuery = "FreeStyleIDs"
+      MyID = "StyleID"
+      MyFirstControl = "Label"
+
+      DoCmd.OpenQuery MyQuery
+      DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_COPY
+      DoCmd.Close A_QUERY, MyQuery
+      DoCmd.GoToRecord A_FORM, "Styles", A_NEWREC
+      DoCmd.GoToControl MyID
+      DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_PASTE
+      DoCmd.GoToControl MyFirstControl
+      Forms!Styles!Label = GetText
+    End If
+    DoCmd.Close A_FORM, "Styles"
+    Me!StyleCombo = ""
+    Me.Refresh
+
+End Sub
+
+Private Sub StyleID_DblClick(Cancel As Integer)
+
+    Dim GotoCriteria As String, MyForm As String
+    Dim MyKey As String, MyFirstControl As String
+
+    If Screen.ActiveControl <> "" Then
+      MyForm = "Styles"
+      MyKey = "StyleID"
+      MyFirstControl = "Label"
+
+      GotoCriteria = Screen.ActiveControl
+      DoCmd.OpenForm MyForm
+      DoCmd.GoToControl MyKey
+      DoCmd.FindRecord GotoCriteria
+      DoCmd.GoToControl MyFirstControl
+    End If
+
+End Sub

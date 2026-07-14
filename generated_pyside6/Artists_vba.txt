@@ -1,0 +1,137 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database   'Use database order for string comparisons
+Private Sub AddArtistButton_Click()
+On Error GoTo Err_AddArtistButton_Click
+
+'    NewIDMgt.AddNewID "ArtistID", "FreeArtistIDs"
+
+    Dim MyFirstControl As String
+
+    DoCmd.GoToRecord , , acNewRec
+
+    MyFirstControl = "Name"
+
+    DoCmd.GoToControl MyFirstControl
+
+Exit_AddArtistButton_Click:
+    Exit Sub
+
+Err_AddArtistButton_Click:
+    MsgBox Error$
+    Resume Exit_AddArtistButton_Click
+
+End Sub
+Private Sub ArtistCombo_AfterUpdate()
+
+   Dim Criteria As String     ' This is the argument to the FindFirst method.
+   Dim MyRS As Recordset      ' Recordset used to search.
+   Dim ActiveName As Integer  ' The name of the ActiveName to search for.
+
+   Set MyRS = Me.RecordsetClone
+
+   ' Build the criteria.
+   ActiveName = Screen.ActiveControl
+   Criteria = "[ArtistID]=" & ActiveName
+
+   ' Perform the search.
+   MyRS.FindFirst Criteria
+
+   If MyRS.NoMatch Then
+      MsgBox "Not Found, Creating new record: " & ActiveName
+      DoCmd.GoToRecord , , A_NEWREC
+      Me![ArtistID] = Me!ArtistCombo
+      Me.Refresh
+   Else
+      ' Synchronize the form's record to the dynaset's record.
+      Me.Bookmark = MyRS.Bookmark
+   End If
+
+   Me!ArtistCombo = ""
+
+End Sub
+Private Sub ArtistID_AfterUpdate()
+  Me.Refresh
+End Sub
+Private Sub ButtonDeleteArtist_Click()
+On Error GoTo Err_ButtonDeleteArtist_Click
+
+
+    DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+
+Exit_ButtonDeleteArtist_Click:
+    Exit Sub
+
+Err_ButtonDeleteArtist_Click:
+    MsgBox Error$
+    Resume Exit_ButtonDeleteArtist_Click
+
+End Sub
+
+Private Sub ButtonPreviousArtist_Click()
+On Error GoTo Err_ButtonPreviousArtist_Click
+
+    DoCmd.GoToRecord , , A_PREVIOUS
+
+Exit_ButtonPreviousArtist_Click:
+    Exit Sub
+
+Err_ButtonPreviousArtist_Click:
+    MsgBox Error$
+    Resume Exit_ButtonPreviousArtist_Click
+
+End Sub
+Private Sub Form_AfterUpdate()
+    Me.ArtistCombo.Requery
+    ArtistDuplicates
+End Sub
+Private Sub Form_BeforeInsert(Cancel As Integer)
+    BuildNewID Me.Name, "ArtistID"
+End Sub
+Private Sub Name_DblClick(Cancel As Integer)
+On Error GoTo Err_Name_DblClick
+
+    DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+
+Exit_Name_DblClick:
+    Exit Sub
+
+Err_Name_DblClick:
+    MsgBox Error$
+    Resume Exit_Name_DblClick
+
+
+End Sub
+Private Sub Surname_DblClick(Cancel As Integer)
+On Error GoTo Err_title_dblClick
+
+    DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+
+Exit_Button48_Click:
+    Exit Sub
+
+Err_title_dblClick:
+    MsgBox Error$
+    Resume Exit_Button48_Click
+
+End Sub
+Function ArtistDuplicates() As Boolean
+Dim qdf As QueryDef, rst As Recordset, sqlTxT As String
+On Error Resume Next
+sqlTxT = "SELECT Count([Artists].[Name] & [Artists].[Surname]) AS Duplications, " & _
+"[Artists].[Name] & ' ' & [Artists].[Surname] AS DuplicatedArtist " & _
+"FROM Artists WHERE ([Artists].[Name] & [Artists].[Surname])= '" & Trim(Me!Name) & Trim(Me!Surname) & "' " & _
+"GROUP BY Artists.Name & ' ' & Artists.Surname " & _
+"HAVING (((Count([Artists].[Name] & [Artists].[Surname]))>1)) "
+Set rst = CurrentDb.OpenRecordset(sqlTxT)
+With rst
+    If .RecordCount >= 1 Then
+        MsgBox "the artist " & "" & "already exists", vbOKOnly, "Duplicate Artist Warning"
+        ArtistDuplicates = True
+    End If
+    .Close
+End With
+End Function
