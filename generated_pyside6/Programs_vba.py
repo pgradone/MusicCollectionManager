@@ -1,23 +1,23 @@
 
 def ButtonAddProgram_Click(self) -> None:
-    # DoCmd.GoToRecord , , A_NEWREC
-    self.Description.setFocus()
+    # TODO: DoCmd.GoToRecord , , A_NEWREC
+    self.description.setFocus()
 
 def ButtonDeleteProgram_Click(self) -> None:
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
     pass
 
 def ButtonDeleteSchedule_Click(self) -> None:
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
     pass
 
 def ButtonPrintRecord_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonPrintRecord_Click
 
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-    # DoCmd.PrintOut A_SELECTION
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    # TODO: DoCmd.PrintOut A_SELECTION
 
     # label: Exit_ButtonPrintRecord_Click
     return
@@ -27,10 +27,11 @@ def ButtonPrintRecord_Click(self) -> None:
     # VBA: Resume Exit_ButtonPrintRecord_Click
 
 def Form_BeforeInsert(self, Cancel: int) -> None:
-    BuildNewID(self.Name, "ProgramID")
+    # TODO: BuildNewID Me.Name, "ProgramID"
+    pass
 
 def Form_Open(self, Cancel: int) -> None:
-    # DoCmd.MoveSize , 0, , 9500
+    # TODO: DoCmd.MoveSize , 0, , 9500
     pass
 
 def ProgramID_AfterUpdate(self) -> None:
@@ -39,38 +40,38 @@ def ProgramID_AfterUpdate(self) -> None:
 def SongCombo_AfterUpdate(self) -> None:
     # VBA: On Error GoTo Err_SongCombo_AfterUpdate
 
-    Criteria: str = None
-    ArtistsOfSong: str = None
-    ArtistCriteria: str = None
-    RecordCriteria: str = None
+    Criteria: str = ""
+    ArtistsOfSong: str = ""
+    ArtistCriteria: str = ""
+    RecordCriteria: str = ""
     MyRecords: Any = None
       # dim MyContain As Recordset,
     MyDb: Any = None
     MySchedule: Any = None
-    RecordsOfSong: str = None
+    RecordsOfSong: str = ""
     MySongs: Any = None
     MyArtists: Any = None
     MySing: Any = None
     MyWS: Any = None
-    Myfile: str = None
+    Myfile: str = ""
       # Myfile = Right(CurrentDb.TableDefs(1).Connect, Len(CurrentDb.TableDefs(1).Connect) - 10)
       # Myfile = "MusiDB.mdb"
-    MyWS = DBEngine.Workspaces(0)
+    # TODO: Set MyWS = DBEngine.Workspaces(0)
       # Set MyDB = MyWS.OpenDatabase(Myfile)
-    MyDb = CurrentDb
-    Criteria = "[SongID] = " + self.SongCombo
-    MySchedule = MyDb.OpenRecordset("Schedule", DB_OPEN_TABLE)
-    MySongs = MyDb.OpenRecordset("Songs", DB_OPEN_DYNASET)
-    MyArtists = MyDb.OpenRecordset("Artists", DB_OPEN_DYNASET)
-    MySing = MyDb.OpenRecordset("Sing", DB_OPEN_DYNASET)
-    MyContain = MyDb.OpenRecordset("Contain", DB_OPEN_DYNASET)
-    MyRecords = MyDb.OpenRecordset("Records", DB_OPEN_DYNASET)
+    # TODO: Set MyDb = CurrentDb
+    Criteria = "[SongID] = " + self.song_combo
+    MySchedule = MyDb.OpenRecordset("Schedule", 1)
+    MySongs = MyDb.OpenRecordset("Songs", 2)
+    MyArtists = MyDb.OpenRecordset("Artists", 2)
+    MySing = MyDb.OpenRecordset("Sing", 2)
+    MyContain = MyDb.OpenRecordset("Contain", 2)
+    MyRecords = MyDb.OpenRecordset("Records", 2)
 
     MySongs.FindFirst(Criteria)
     MySchedule.Index = "PrimaryKey"
     MySchedule.AddNew()
-    MySchedule["ProgramID"] = self.ProgramID  # **** Fill Schedule IDs
-    MySchedule["Position"] = self.PositionSchedule
+    MySchedule["ProgramID"] = self.program_i_d  # **** Fill Schedule IDs
+    MySchedule["Position"] = self.position_schedule
     MySing.FindFirst(Criteria)
     while not (MySing.NoMatch):
         ArtistCriteria = "[ArtistID] = " + MySing["ArtistID"]
@@ -95,9 +96,9 @@ def SongCombo_AfterUpdate(self) -> None:
       # End If
       # MyContain.FindNext Criteria
       # Loop
-    RecordsOfSong = self.SongCombo.Column(3)
+    # TODO: RecordsOfSong = Me.SongCombo.Column(3)
       # ********* Fill Fields with calculated contents
-    MySchedule["SongID"] = self.SongCombo
+    MySchedule["SongID"] = self.song_combo
     ArtistsOfSong = ArtistsOfSong.strip()
     MySchedule["Song_Artist"] = MySongs["Title"] + " * " + ArtistsOfSong[:int(79)]
     MySchedule["Record"] = RecordsOfSong.strip()[:int(79)]
@@ -110,7 +111,7 @@ def SongCombo_AfterUpdate(self) -> None:
     MySongs.Close()
     MySing.Close()
     MyArtists.Close()
-    self.PositionSchedule = self.PositionSchedule + 1
+    self.position_schedule = self.position_schedule + 1
     self.Refresh()
 
     # label: Exit_SongCombo_AfterUpdate
@@ -122,21 +123,22 @@ def SongCombo_AfterUpdate(self) -> None:
     # VBA: Resume Exit_SongCombo_AfterUpdate
 
 def SupportChooseCombo_AfterUpdate(self) -> None:
-    self.SongCombo.Requery()
+    # TODO: self.song_combo.Requery()
+    pass
 
 def CalcTTime(self) -> str:
     TotTime: datetime.datetime = None
     totRec: Any = None
-    TotRecNull: int = None
-    sqlTxT: str = None
+    TotRecNull: int = 0
+    sqlTxT: str = ""
     rst: Any = None
-    CTT: str = None
+    CTT: str = ""
     CTT = ""
-    if self.ProgramID is None:
+    if self.program_i_d is None:
         return
-    sqlTxT = "SELECT Schedule.ProgramID, datetime.datetime.strptime(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5))))) AS Tim, datetime.datetime.strptime(CDate(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5)))))*(Count(TIme Is None if None else 'FulTim')+Count(TIme Is None if 'NulTim' else None))/Count(TIme Is None if None else 'FulTim')) AS AvgTim, Count(TIme Is None if None else 'FulTim') AS FullTim, Count(TIme Is None if 'NulTim' else None) AS NullTim FROM Songs INNER JOIN Schedule ON Songs.SongID = Schedule.SongID GROUP BY Schedule.ProgramID " + "HAVING ProgramID = " + self.ProgramID
+    sqlTxT = "SELECT Schedule.ProgramID, datetime.datetime.strptime(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5))))) AS Tim, datetime.datetime.strptime(CDate(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5)))))*(Count(TIme Is None if None else 'FulTim')+Count(TIme Is None if 'NulTim' else None))/Count(TIme Is None if None else 'FulTim')) AS AvgTim, Count(TIme Is None if None else 'FulTim') AS FullTim, Count(TIme Is None if 'NulTim' else None) AS NullTim FROM Songs INNER JOIN Schedule ON Songs.SongID = Schedule.SongID GROUP BY Schedule.ProgramID " + "HAVING ProgramID = " + self.program_i_d
       # sqltxt = "SELECT IIF(Time is null,NULL,'00:' & left(format(time,""hh:nn""),5)) AS Tim " &         "FROM Songs INNER JOIN Schedule on Songs.SongID = Schedule.SongID " &         "WHERE ProgramID = " & Me.ProgramID
-    rst = CurrentDb.OpenRecordset(sqlTxT)
+    # TODO: Set rst = CurrentDb.OpenRecordset(sqlTxT)
       # Do While Not rst.EOF
       # If IsNull(rst!Tim) Then
       # TotTime = TotTime + CDate(rst!Tim)

@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: Songs
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class Songs(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("Songs")
         self.setObjectName("Songs")
         self.resize(684, 400)
@@ -77,7 +80,9 @@ class Songs(QMainWindow):
         self.song_i_d.setGeometry(114, 8, 58, 16)
         self.song_i_d.setEditable(True)
 
-        self.song_i_d.doubleClicked.connect(self.SongID_DblClick)
+        self.song_i_d.installEventFilter(self)
+        self._dbl_click_widgets.add(self.song_i_d)
+        # DblClick -> self.SongID_DblClick (via eventFilter)
 
         self.song_combo = QComboBox(self.central_widget)
         self.song_combo.setObjectName("SongCombo")
@@ -97,7 +102,9 @@ class Songs(QMainWindow):
         _fnt.setPointSize(9)
         self.title.setFont(_fnt)
 
-        self.title.doubleClicked.connect(self.Title_DblClick)
+        self.title.installEventFilter(self)
+        self._dbl_click_widgets.add(self.title)
+        # DblClick -> self.Title_DblClick (via eventFilter)
 
         self.b_p_m = QLineEdit(self.central_widget)
         self.b_p_m.setObjectName("BPM")
@@ -108,7 +115,9 @@ class Songs(QMainWindow):
         _fnt.setPointSize(9)
         self.b_p_m.setFont(_fnt)
 
-        self.b_p_m.doubleClicked.connect(self.BPM_DblClick)
+        self.b_p_m.installEventFilter(self)
+        self._dbl_click_widgets.add(self.b_p_m)
+        # DblClick -> self.BPM_DblClick (via eventFilter)
 
         self.year = QLineEdit(self.central_widget)
         self.year.setObjectName("Year")
@@ -119,7 +128,9 @@ class Songs(QMainWindow):
         _fnt.setPointSize(9)
         self.year.setFont(_fnt)
 
-        self.year.doubleClicked.connect(self.Year_DblClick)
+        self.year.installEventFilter(self)
+        self._dbl_click_widgets.add(self.year)
+        # DblClick -> self.Year_DblClick (via eventFilter)
 
         # SubForm: Embedded33
         self.embedded33 = QWidget(self.central_widget)
@@ -144,7 +155,9 @@ class Songs(QMainWindow):
         _fnt.setPointSize(9)
         self.time.setFont(_fnt)
 
-        self.time.doubleClicked.connect(self.Time_DblClick)
+        self.time.installEventFilter(self)
+        self._dbl_click_widgets.add(self.time)
+        # DblClick -> self.Time_DblClick (via eventFilter)
 
         # SubForm: StylesOfSong
         self.styles_of_song = QWidget(self.central_widget)
@@ -159,7 +172,7 @@ class Songs(QMainWindow):
 
     def BPM_DblClick(self, Cancel: int) -> None:
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
         pass
 
     def ButtonAddSong_Click(self) -> None:
@@ -167,11 +180,11 @@ class Songs(QMainWindow):
 
           # NewIDMgt.AddNewID "SongID", "FreeSongIDs"
 
-        MyFirstControl: str = None
-        # DoCmd.GoToRecord , , acNewRec
+        MyFirstControl: str = ""
+        # TODO: DoCmd.GoToRecord , , acNewRec
         MyFirstControl = "Title"
 
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyFirstControl
 
         # label: Exit_ButtonAddSong_Click
         return
@@ -183,8 +196,8 @@ class Songs(QMainWindow):
     def ButtonDeleteSong_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonDeleteSong_Click
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
 
         # label: Exit_ButtonDeleteSong_Click
         return
@@ -197,28 +210,29 @@ class Songs(QMainWindow):
 
         MyDb: Any = None
         MyTable: Any = None
-        MyDb = DBEngine.Workspaces(0).Databases(0)
-        MyTable = MyDb.OpenRecordset("Contain", DB_OPEN_TABLE)
+        # TODO: Set MyDb = DBEngine.Workspaces(0).Databases(0)
+        MyTable = MyDb.OpenRecordset("Contain", 1)
         MyTable.Index = "PrimaryKey"
         MyTable.AddNew()
-        MyTable["SongID"] = self.SongCombo
-        MyTable["RecordID"] = self.RecordID
+        MyTable["SongID"] = self.song_combo
+        MyTable["RecordID"] = self.record_i_d
         MyTable.Update()
         MyTable.Close()
         self.Refresh()
-        self.SongCombo = ""
+        self.song_combo = ""
 
     def Form_BeforeInsert(self, Cancel: int) -> None:
-        BuildNewID(self.Name, "SongID")
+        # TODO: BuildNewID Me.Name, "SongID"
+        pass
 
     def SongCombo_AfterUpdate(self) -> None:
 
-        Criteria: str = None
+        Criteria: str = ""
         MyRS: Any = None
-        ActiveName: str = None
-        Prompt: str = None
-        Message: str = None
-        CRLF: str = None
+        ActiveName: str = ""
+        Prompt: str = ""
+        Message: str = ""
+        CRLF: str = ""
         # VBA Const: MB_ICONQUESTION = 32
         # VBA Const: YES = 6
         # VBA Const: YES_NO = 4
@@ -228,38 +242,38 @@ class Songs(QMainWindow):
         MyRS = self.RecordsetClone
 
           # Build the criteria.
-        ActiveName = self.focusWidget() if self.focusWidget() else ""
+        ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
         Criteria = "[SongID] = " + ActiveName
           # Perform the search.
         MyRS.FindFirst(Criteria)
 
         if MyRS.NoMatch:
             Message = ActiveName + " not found" + CRLF
-            if MsgBox(Message + Prompt, MB_ICONQUESTION + YES_NO, "Create new Song")  ==  YES:
-                # DoCmd.GoToRecord , , A_NEWREC
-                self.SongID = self.SongCombo
+            if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
+                # TODO: DoCmd.GoToRecord , , A_NEWREC
+                self.song_i_d = self.song_combo
                 self.Refresh()
         else:
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
 
-        self.SongCombo = ""
+        self.song_combo = ""
 
     def SongID_AfterUpdate(self) -> None:
         self.Refresh()
 
     def SongID_DblClick(self, Cancel: int) -> None:
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
         pass
 
     def Time_DblClick(self, Cancel: int) -> None:
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
         pass
 
     def Title_DblClick(self, Cancel: int) -> None:
         # VBA: On Error GoTo Err_title_dblClick
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
         # label: Exit_Button48_Click
         return
@@ -269,8 +283,37 @@ class Songs(QMainWindow):
         # VBA: Resume Exit_Button48_Click
 
     def Year_DblClick(self, Cancel: int) -> None:
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
         pass
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

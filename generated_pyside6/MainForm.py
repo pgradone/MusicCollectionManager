@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: MainForm
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class MainForm(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("MainForm")
         self.setObjectName("MainForm")
         self.resize(440, 400)
@@ -206,11 +209,11 @@ class MainForm(QMainWindow):
     def Button_OpenQuery_Rec_Click(self) -> None:
         # VBA: On Error GoTo Err_Button_OpenQuery_Rec_Click
 
-        QueryName: str = None
-        LinkCriteria: str = None
+        QueryName: str = ""
+        LinkCriteria: str = ""
 
         QueryName = "Records_Songs_Artists"
-        # DoCmd.OpenQuery QueryName
+        # TODO: DoCmd.OpenQuery QueryName
 
         # label: Exit_Button_OpenQuery_Rec_Click
         return
@@ -222,8 +225,8 @@ class MainForm(QMainWindow):
     def ButtonOpenArtists_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonOpenArtists_Click
 
-        DocName: str = None
-        LinkCriteria: str = None
+        DocName: str = ""
+        LinkCriteria: str = ""
 
         DocName = "Artists"
         # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -238,13 +241,13 @@ class MainForm(QMainWindow):
     def ButtonOpenPrograms_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonOpenPrograms_Click
 
-        DocName: str = None
-        LinkCriteria: str = None
+        DocName: str = ""
+        LinkCriteria: str = ""
 
         DocName = "Programs"
         # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
-        # DoCmd.GoToRecord , "", acLast
-        # DoCmd.MoveSize 0, 0
+        # TODO: DoCmd.GoToRecord , "", acLast
+        # TODO: DoCmd.MoveSize 0, 0
 
         # label: Exit_ButtonOpenPrograms_Click
         return
@@ -256,8 +259,8 @@ class MainForm(QMainWindow):
     def ButtonOpenRecords_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonOpenRecords_Click
 
-        DocName: str = None
-        LinkCriteria: str = None
+        DocName: str = ""
+        LinkCriteria: str = ""
 
         DocName = "Records"
         # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -272,8 +275,8 @@ class MainForm(QMainWindow):
     def ButtonOpenSongs_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonOpenSongs_Click
 
-        DocName: str = None
-        LinkCriteria: str = None
+        DocName: str = ""
+        LinkCriteria: str = ""
 
         DocName = "Songs"
         # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -288,8 +291,8 @@ class MainForm(QMainWindow):
     def ButtonOpenStyles_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonOpenStyles_Click
 
-        DocName: str = None
-        LinkCriteria: str = None
+        DocName: str = ""
+        LinkCriteria: str = ""
 
         DocName = "Styles"
         # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -304,7 +307,7 @@ class MainForm(QMainWindow):
     def ButtonQuitApplicatio_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonQuitApplicatio_Click
 
-        self.close()
+        # TODO: DoCmd.Close
 
         # label: Exit_ButtonQuitApplicatio_Click
         return
@@ -312,6 +315,35 @@ class MainForm(QMainWindow):
         # label: Err_ButtonQuitApplicatio_Click
         QMessageBox.information(self, '', str("Unknown error"))
         # VBA: Resume Exit_ButtonQuitApplicatio_Click
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

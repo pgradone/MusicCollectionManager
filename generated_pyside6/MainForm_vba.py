@@ -2,11 +2,11 @@
 def Button_OpenQuery_Rec_Click(self) -> None:
     # VBA: On Error GoTo Err_Button_OpenQuery_Rec_Click
 
-    QueryName: str = None
-    LinkCriteria: str = None
+    QueryName: str = ""
+    LinkCriteria: str = ""
 
     QueryName = "Records_Songs_Artists"
-    # DoCmd.OpenQuery QueryName
+    # TODO: DoCmd.OpenQuery QueryName
 
     # label: Exit_Button_OpenQuery_Rec_Click
     return
@@ -18,8 +18,8 @@ def Button_OpenQuery_Rec_Click(self) -> None:
 def ButtonOpenArtists_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonOpenArtists_Click
 
-    DocName: str = None
-    LinkCriteria: str = None
+    DocName: str = ""
+    LinkCriteria: str = ""
 
     DocName = "Artists"
     # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -34,13 +34,13 @@ def ButtonOpenArtists_Click(self) -> None:
 def ButtonOpenPrograms_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonOpenPrograms_Click
 
-    DocName: str = None
-    LinkCriteria: str = None
+    DocName: str = ""
+    LinkCriteria: str = ""
 
     DocName = "Programs"
     # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
-    # DoCmd.GoToRecord , "", acLast
-    # DoCmd.MoveSize 0, 0
+    # TODO: DoCmd.GoToRecord , "", acLast
+    # TODO: DoCmd.MoveSize 0, 0
 
     # label: Exit_ButtonOpenPrograms_Click
     return
@@ -52,8 +52,8 @@ def ButtonOpenPrograms_Click(self) -> None:
 def ButtonOpenRecords_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonOpenRecords_Click
 
-    DocName: str = None
-    LinkCriteria: str = None
+    DocName: str = ""
+    LinkCriteria: str = ""
 
     DocName = "Records"
     # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -68,8 +68,8 @@ def ButtonOpenRecords_Click(self) -> None:
 def ButtonOpenSongs_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonOpenSongs_Click
 
-    DocName: str = None
-    LinkCriteria: str = None
+    DocName: str = ""
+    LinkCriteria: str = ""
 
     DocName = "Songs"
     # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -84,8 +84,8 @@ def ButtonOpenSongs_Click(self) -> None:
 def ButtonOpenStyles_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonOpenStyles_Click
 
-    DocName: str = None
-    LinkCriteria: str = None
+    DocName: str = ""
+    LinkCriteria: str = ""
 
     DocName = "Styles"
     # TODO: DoCmd.OpenForm DocName, , , LinkCriteria
@@ -100,7 +100,7 @@ def ButtonOpenStyles_Click(self) -> None:
 def ButtonQuitApplicatio_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonQuitApplicatio_Click
 
-    self.close()
+    # TODO: DoCmd.Close
 
     # label: Exit_ButtonQuitApplicatio_Click
     return

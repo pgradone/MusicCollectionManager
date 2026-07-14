@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: Styles
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class Styles(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("Styles")
         self.setObjectName("Styles")
         self.resize(509, 400)
@@ -103,12 +106,12 @@ class Styles(QMainWindow):
     def ButtonAddStyle_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonAddStyle_Click
 
-        NewIDMgt.AddNewID("StyleID", "FreeStyleIDs")
+        # TODO: NewIDMgt.AddNewID "StyleID", "FreeStyleIDs"
 
-        MyFirstControl: str = None
+        MyFirstControl: str = ""
         MyFirstControl = "Label"
 
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyFirstControl
 
         # label: Exit_ButtonAddStyle_Click
         return
@@ -121,8 +124,8 @@ class Styles(QMainWindow):
         # VBA: On Error GoTo Err_ButtonDeleteStyle_Click
 
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
 
         # label: Exit_ButtonDeleteStyle_Click
         return
@@ -132,15 +135,16 @@ class Styles(QMainWindow):
         # VBA: Resume Exit_ButtonDeleteStyle_Click
 
     def Form_BeforeInsert(self, Cancel: int) -> None:
-        BuildNewID(self.Name, "StyleID")
+        # TODO: BuildNewID Me.Name, "StyleID"
+        pass
 
     def MusicStyleCombo_AfterUpdate(self) -> None:
-        Criteria: str = None
+        Criteria: str = ""
         MyRS: Any = None
-        ActiveName: str = None
-        Prompt: str = None
-        Message: str = None
-        CRLF: str = None
+        ActiveName: str = ""
+        Prompt: str = ""
+        Message: str = ""
+        CRLF: str = ""
         # VBA Const: MB_ICONQUESTION = 32
         # VBA Const: YES = 6
         # VBA Const: YES_NO = 4
@@ -150,20 +154,49 @@ class Styles(QMainWindow):
         MyRS = self.RecordsetClone
 
           # Build the criteria.
-        ActiveName = self.focusWidget() if self.focusWidget() else ""
+        ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
         Criteria = "[StyleID] = " + ActiveName
           # Perform the search.
         MyRS.FindFirst(Criteria)
 
         if MyRS.NoMatch:
             Message = ActiveName + " not found" + CRLF
-            if MsgBox(Message + Prompt, MB_ICONQUESTION + YES_NO, "Create new Style")  ==  YES:
-                # DoCmd.GoToRecord , , A_NEWREC
-                self.SongID = self.SongCombo
+            if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
+                # TODO: DoCmd.GoToRecord , , A_NEWREC
+                self.song_i_d = self.song_combo
                 self.Refresh()
         else:
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

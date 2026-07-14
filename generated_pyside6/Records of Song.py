@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: Records of Song
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class Records_of_Song(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("Records of Song")
         self.setObjectName("Records of Song")
         self.resize(566, 400)
@@ -137,7 +140,9 @@ class Records_of_Song(QMainWindow):
         self.record_i_d.setText("RecordID")
         self.record_i_d.setGeometry(1, 1, 38, 2)
 
-        self.record_i_d.doubleClicked.connect(self.RecordID_DblClick)
+        self.record_i_d.installEventFilter(self)
+        self._dbl_click_widgets.add(self.record_i_d)
+        # DblClick -> self.RecordID_DblClick (via eventFilter)
 
         self.support = QComboBox(self.central_widget)
         self.support.setObjectName("Support")
@@ -179,27 +184,27 @@ class Records_of_Song(QMainWindow):
 
     def ButtonRemoveRecord_Click(self) -> None:
 
-        # Forms! reference: RelationsMgt.RemoveFromButton "Contain", self.RecordID, Forms!Songs![SongID], "BPM"
+        # Forms! reference: RelationsMgt.RemoveFromButton "Contain", self.record_i_d, Forms!Songs![SongID], "BPM"
         pass
 
     def RecordCombo_AfterUpdate(self) -> None:
 
-        # Forms! reference: RelationsMgt.AddFromCombo Forms!Songs![SongID], "BPM", self.RecordCombo, "SongID", "RecordID", "Songs", "Contain"
+        # Forms! reference: RelationsMgt.AddFromCombo Forms!Songs![SongID], "BPM", self.record_combo, "SongID", "RecordID", "Songs", "Contain"
         pass
 
     def RecordCombo_NotInList(self, NewData: str, Response: int) -> None:
 
-        ActiveID: int = None
-        NewID: int = None
+        ActiveID: int = 0
+        NewID: int = 0
         GetText: Any = None
-        Prompt: str = None
-        Message: str = None
-        CRLF: str = None
-        ActiveName: str = None
-        MyQuery: str = None
-        MyForm: str = None
-        MyID: str = None
-        MyFirstControl: str = None
+        Prompt: str = ""
+        Message: str = ""
+        CRLF: str = ""
+        ActiveName: str = ""
+        MyQuery: str = ""
+        MyForm: str = ""
+        MyID: str = ""
+        MyFirstControl: str = ""
         # VBA Const: MB_ICONQUESTION = 32
         # VBA Const: YES = 6
         # VBA Const: YES_NO = 4
@@ -209,7 +214,7 @@ class Records_of_Song(QMainWindow):
           # Debug.Print GetText
 
         Message = GetText + " not found" + CRLF
-        if MsgBox(Message + Prompt, MB_ICONQUESTION + YES_NO, "Create new?")  ==  YES:
+        if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
 
               # like ButtonAddRecord_Click
 
@@ -218,35 +223,64 @@ class Records_of_Song(QMainWindow):
             MyID = "RecordID"
             MyFirstControl = "Title"
 
-            # DoCmd.OpenQuery MyQuery
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_COPY
-            self.close()
+            # TODO: DoCmd.OpenQuery MyQuery
+            # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_COPY
+            # TODO: DoCmd.Close A_QUERY, MyQuery
             # TODO: DoCmd.OpenForm MyForm
-            # DoCmd.GoToRecord A_FORM, MyForm, A_NEWREC
-            # DoCmd.GoToControl MyID
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_PASTE
+            # TODO: DoCmd.GoToRecord A_FORM, MyForm, A_NEWREC
+            # TODO: DoCmd.GoToControl MyID
+            # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_PASTE
             # Forms! reference: Forms!Artists!Name = GetText
-            # DoCmd.GoToControl MyFirstControl
+            # TODO: DoCmd.GoToControl MyFirstControl
         # Forms! reference: Forms!Songs!ArtistCombo = ""
         # Forms! reference: Forms!Songs.Refresh
 
     def RecordID_DblClick(self, Cancel: int) -> None:
 
-        GotoCriteria: str = None
-        MyForm: str = None
-        MyKey: str = None
-        MyFirstControl: str = None
+        GotoCriteria: str = ""
+        MyForm: str = ""
+        MyKey: str = ""
+        MyFirstControl: str = ""
 
-        if self.focusWidget() if self.focusWidget() else "" != "":
+        if str(self.focusWidget()) if self.focusWidget() else "" != "":
             MyForm = "Records"
             MyKey = "RecordID"
             MyFirstControl = "Title"
 
-            GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+            GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
+            # TODO: DoCmd.GoToControl MyKey
+            # TODO: DoCmd.FindRecord GotoCriteria
+            # TODO: DoCmd.GoToControl MyFirstControl
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

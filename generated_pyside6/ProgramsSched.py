@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: ProgramsSched
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class ProgramsSched(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("ProgramsSchedule")
         self.setObjectName("ProgramsSched")
         self.resize(616, 400)
@@ -99,7 +102,9 @@ class ProgramsSched(QMainWindow):
         self.song_i_d.setText("SongID")
         self.song_i_d.setGeometry(19, 1, 29, 2)
 
-        self.song_i_d.doubleClicked.connect(self.SongID_DblClick)
+        self.song_i_d.installEventFilter(self)
+        self._dbl_click_widgets.add(self.song_i_d)
+        # DblClick -> self.SongID_DblClick (via eventFilter)
 
         self.song__artist = QLineEdit(self.central_widget)
         self.song__artist.setObjectName("Song_Artist")
@@ -138,21 +143,50 @@ class ProgramsSched(QMainWindow):
 
     def SongID_DblClick(self, Cancel: int) -> None:
 
-        GotoCriteria: str = None
-        MyForm: str = None
-        MyKey: str = None
-        MyFirstControl: str = None
+        GotoCriteria: str = ""
+        MyForm: str = ""
+        MyKey: str = ""
+        MyFirstControl: str = ""
 
-        if self.focusWidget() if self.focusWidget() else "" != "":
+        if str(self.focusWidget()) if self.focusWidget() else "" != "":
             MyForm = "Songs"
             MyKey = "SongID"
             MyFirstControl = "Title"
 
-            GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+            GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
+            # TODO: DoCmd.GoToControl MyKey
+            # TODO: DoCmd.FindRecord GotoCriteria
+            # TODO: DoCmd.GoToControl MyFirstControl
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

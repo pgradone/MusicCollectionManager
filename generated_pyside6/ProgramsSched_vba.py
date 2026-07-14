@@ -1,18 +1,18 @@
 
 def SongID_DblClick(self, Cancel: int) -> None:
 
-    GotoCriteria: str = None
-    MyForm: str = None
-    MyKey: str = None
-    MyFirstControl: str = None
+    GotoCriteria: str = ""
+    MyForm: str = ""
+    MyKey: str = ""
+    MyFirstControl: str = ""
 
-    if self.focusWidget() if self.focusWidget() else "" != "":
+    if str(self.focusWidget()) if self.focusWidget() else "" != "":
         MyForm = "Songs"
         MyKey = "SongID"
         MyFirstControl = "Title"
 
-        GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+        GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
         # TODO: DoCmd.OpenForm MyForm
-        # DoCmd.GoToControl MyKey
-        # DoCmd.FindRecord GotoCriteria
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyKey
+        # TODO: DoCmd.FindRecord GotoCriteria
+        # TODO: DoCmd.GoToControl MyFirstControl

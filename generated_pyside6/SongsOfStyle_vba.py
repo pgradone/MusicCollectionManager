@@ -4,20 +4,20 @@ def Button23_Click(self) -> None:
     MyDb: Any = None
     MyTable: Any = None
     MyQuery: Any = None
-    MyDb = DBEngine.Workspaces(0).Databases(0)
-    MyTable = MyDb.OpenRecordset("Sing", DB_OPEN_TABLE)
+    # TODO: Set MyDb = DBEngine.Workspaces(0).Databases(0)
+    MyTable = MyDb.OpenRecordset("Sing", 1)
 
     MyTable.Index = "PrimaryKey"
-    # Forms! reference: MyTable.Seek "=", Forms!Employees![EmployeeID], self.CompanyID
+    # Forms! reference: MyTable.Seek "=", Forms!Employees![EmployeeID], self.company_i_d
 
     if not MyTable.NoMatch:
         MyTable.Delete()
     MyTable.Close()
-    Forms.Artistss.Refresh()
+    # TODO: Forms.Artistss.Refresh()
 
 def ButtonRemoveSong_Click(self) -> None:
 
-    # Forms! reference: RelationsMgt.RemoveFromButton "Belong", self.SongID, Forms!Styles![StyleID], "Label"
+    # Forms! reference: RelationsMgt.RemoveFromButton "Belong", self.song_i_d, Forms!Styles![StyleID], "Label"
 
       # Dim MyDB As DATABASE, MyTable As Recordset, MyQuery As QueryDef
       # Set MyDB = DBEngine.Workspaces(0).Databases(0)
@@ -35,33 +35,33 @@ def ButtonRemoveSong_Click(self) -> None:
 
 def RecordID_DblClick(self, Cancel: int) -> None:
 
-    FormName: str = None
-    LinkCriteria: str = None
+    FormName: str = ""
+    LinkCriteria: str = ""
 
     FormName = "Records"
-    if self.RecordID != "":
-        LinkCriteria = "[RecordID]=" + self.focusWidget() if self.focusWidget() else ""
+    if self.record_i_d != "":
+        LinkCriteria = "[RecordID]=" + str(self.focusWidget()) if self.focusWidget() else ""
         # TODO: DoCmd.OpenForm FormName, , , LinkCriteria
 
 def SongCombo_AfterUpdate(self) -> None:
 
-    # Forms! reference: RelationsMgt.AddFromCombo Forms!Styles![StyleID], "Label", self.SongCombo, "StyleID", "SongID", "Styles", "Belong"
+    # Forms! reference: RelationsMgt.AddFromCombo Forms!Styles![StyleID], "Label", self.song_combo, "StyleID", "SongID", "Styles", "Belong"
     pass
 
 def SongID_DblClick(self, Cancel: int) -> None:
 
-    GotoCriteria: str = None
-    MyForm: str = None
-    MyKey: str = None
-    MyFirstControl: str = None
+    GotoCriteria: str = ""
+    MyForm: str = ""
+    MyKey: str = ""
+    MyFirstControl: str = ""
 
-    if self.focusWidget() if self.focusWidget() else "" != "":
+    if str(self.focusWidget()) if self.focusWidget() else "" != "":
         MyForm = "Songs"
         MyKey = "SongID"
         MyFirstControl = "Title"
 
-        GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+        GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
         # TODO: DoCmd.OpenForm MyForm
-        # DoCmd.GoToControl MyKey
-        # DoCmd.FindRecord GotoCriteria
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyKey
+        # TODO: DoCmd.FindRecord GotoCriteria
+        # TODO: DoCmd.GoToControl MyFirstControl

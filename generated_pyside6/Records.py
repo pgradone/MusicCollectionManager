@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: Records
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class Records(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("RecordsByTitle")
         self.setObjectName("Records")
         self.resize(595, 479)
@@ -91,7 +94,9 @@ class Records(QMainWindow):
         self.artist_i_d.setGeometry(61, 31, 127, 2)
         self.artist_i_d.setEditable(True)
 
-        self.artist_i_d.doubleClicked.connect(self.ArtistID_DblClick)
+        self.artist_i_d.installEventFilter(self)
+        self._dbl_click_widgets.add(self.artist_i_d)
+        # DblClick -> self.ArtistID_DblClick (via eventFilter)
 
         self.text59 = QLineEdit(self.central_widget)
         self.text59.setObjectName("Text59")
@@ -121,7 +126,9 @@ class Records(QMainWindow):
         _fnt.setPointSize(10)
         self.title.setFont(_fnt)
 
-        self.title.doubleClicked.connect(self.Title_DblClick)
+        self.title.installEventFilter(self)
+        self._dbl_click_widgets.add(self.title)
+        # DblClick -> self.Title_DblClick (via eventFilter)
 
         self.mike = QCheckBox(self.central_widget)
         self.mike.setObjectName("Mike")
@@ -172,31 +179,31 @@ class Records(QMainWindow):
 
 
     def ArtistID_DblClick(self, Cancel: int) -> None:
-        GotoCriteria: str = None
-        MyForm: str = None
-        MyKey: str = None
-        MyFirstControl: str = None
+        GotoCriteria: str = ""
+        MyForm: str = ""
+        MyKey: str = ""
+        MyFirstControl: str = ""
 
-        if self.focusWidget() if self.focusWidget() else "" != "":
+        if str(self.focusWidget()) if self.focusWidget() else "" != "":
             MyForm = "Artists"
             MyKey = "ArtistID"
             MyFirstControl = "Name"
 
-            GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+            GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
+            # TODO: DoCmd.GoToControl MyKey
+            # TODO: DoCmd.FindRecord GotoCriteria
+            # TODO: DoCmd.GoToControl MyFirstControl
 
     def ButtonAddRecord_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonAddRecord_Click
 
-        NewIDMgt.AddNewID("RecordID", "FreeRecordIDs")
+        # TODO: NewIDMgt.AddNewID "RecordID", "FreeRecordIDs"
 
-        MyFirstControl: str = None
+        MyFirstControl: str = ""
         MyFirstControl = "Title"
 
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyFirstControl
 
         # label: Exit_ButtonAddRecord_Click
         return
@@ -209,8 +216,8 @@ class Records(QMainWindow):
         # VBA: On Error GoTo Err_ButtonDelRecord_Click
 
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
 
         # label: Exit_ButtonDelRecord_Click
         return
@@ -222,7 +229,7 @@ class Records(QMainWindow):
     def ButtonFindRecord_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonFindRecord_Click
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
         # label: Exit_ButtonFindRecord_Click
         return
@@ -235,8 +242,8 @@ class Records(QMainWindow):
         # VBA: On Error GoTo Err_ButtonPrintRecord_Click
 
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-        # DoCmd.PrintOut A_SELECTION
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+        # TODO: DoCmd.PrintOut A_SELECTION
 
         # label: Exit_ButtonPrintRecord_Click
         return
@@ -246,39 +253,40 @@ class Records(QMainWindow):
         # VBA: Resume Exit_ButtonPrintRecord_Click
 
     def Form_BeforeInsert(self, Cancel: int) -> None:
-        BuildNewID(self.Name, "RecordID")
+        # TODO: BuildNewID Me.Name, "RecordID"
+        pass
 
     def Form_Current(self) -> None:
         self.Refresh()
 
     def List51_DblClick(self, Cancel: int) -> None:
 
-        GotoCriteria: str = None
-        MyForm: str = None
-        MyKey: str = None
-        MyFirstControl: str = None
+        GotoCriteria: str = ""
+        MyForm: str = ""
+        MyKey: str = ""
+        MyFirstControl: str = ""
 
-        if self.focusWidget() if self.focusWidget() else "" != "":
+        if str(self.focusWidget()) if self.focusWidget() else "" != "":
             MyForm = "Artists"
             MyKey = "ArtistID"
             MyFirstControl = "Name"
 
-            GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+            GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
+            # TODO: DoCmd.GoToControl MyKey
+            # TODO: DoCmd.FindRecord GotoCriteria
+            # TODO: DoCmd.GoToControl MyFirstControl
 
     def RecordCombo_AfterUpdate(self) -> None:
 
-        Criteria: str = None
+        Criteria: str = ""
         MyRS: Any = None
-        ActiveName: int = None
+        ActiveName: int = 0
 
         MyRS = self.RecordsetClone
 
           # Build the criteria.
-        ActiveName = self.focusWidget() if self.focusWidget() else ""
+        ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
         Criteria = "[RecordID]=" + ActiveName
 
           # Perform the search.
@@ -286,33 +294,35 @@ class Records(QMainWindow):
 
         if MyRS.NoMatch:
             QMessageBox.information(self, '', str("Not Found, Creating new record: " + ActiveName))
-            # DoCmd.GoToRecord , , A_NEWREC
-            self.RecordID = self.RecordCombo
+            # TODO: DoCmd.GoToRecord , , A_NEWREC
+            self.record_i_d = self.record_combo
             self.Refresh()
         else:
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
 
-        self.RecordCombo = ""
+        self.record_combo = ""
 
     def RecordID_AfterUpdate(self) -> None:
         self.Refresh()
 
     def SongView_AfterUpdate(self) -> None:
 
-        ActiveValue: str = None
+        ActiveValue: str = ""
 
-        ActiveValue = self.focusWidget() if self.focusWidget() else ""
+        ActiveValue = str(self.focusWidget()) if self.focusWidget() else ""
         if ActiveValue  ==  "Form":
-            self.SongsInRecord.SourceObject = "Songs"
+            pass
+            # TODO: Me![SongsInRecord].SourceObject = "Songs"
         if ActiveValue  ==  "Tabular":
-            self.SongsInRecord.SourceObject = "SongsOfRecord"
+            pass
+            # TODO: Me![SongsInRecord].SourceObject = "SongsOfRecord"
 
     def Title_DblClick(self, Cancel: int) -> None:
 
         # VBA: On Error GoTo Err_title_dblClick
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
         # label: Exit_Button48_Click
         return
@@ -320,6 +330,35 @@ class Records(QMainWindow):
         # label: Err_title_dblClick
         QMessageBox.information(self, '', str("Unknown error"))
         # VBA: Resume Exit_Button48_Click
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

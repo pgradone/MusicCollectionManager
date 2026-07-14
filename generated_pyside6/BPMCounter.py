@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: BPMCounter
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class BPMCounter(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("BPMCounter")
         self.setObjectName("BPMCounter")
         self.resize(404, 400)
@@ -91,37 +94,70 @@ class BPMCounter(QMainWindow):
 
     # --- VBA Event Handlers ---
 
+# VBA Dim: Timin As Date, Counter, Secs As Double
 
     def BPMVal_AfterUpdate(self) -> None:
-        ResetAll()
+        # TODO: ResetAll
+        pass
 
     def Form_Load(self) -> None:
-        ResetAll()
+        # TODO: ResetAll
+        pass
 
     def CommandReset_Click(self) -> None:
-        ResetAll()
+        # TODO: ResetAll
+        pass
 
     def Form_Timer(self) -> None:
-        Secs = str(datetime.datetime.now().time() - Timin)
-        self.Timing = Secs
-        Counter = Secs * self.BPMVal / 60
-        self.Count = Counter
-        self.BR.Left = 500 + 2000 * (Counter - Int(Counter))
+        # TODO: Secs = Format(Time - Timin, "s")
+        self.timing = Secs
+        Counter = Secs * self.b_p_m_val / 60
+        self.count = Counter
+        # TODO: Me.BR.Left = 500 + 2000 * (Counter - Int(Counter))
 
     def MinusOne_Click(self) -> None:
-        self.BPMVal = self.BPMVal - 1
-        # DoCmd.RunCommand acCmdSave
-        ResetAll()
+        self.b_p_m_val = self.b_p_m_val - 1
+        # TODO: DoCmd.RunCommand acCmdSave
+        # TODO: ResetAll
 
     def PlusOne_Click(self) -> None:
-        self.BPMVal = self.BPMVal + 1
-        # DoCmd.RunCommand acCmdSave
-        ResetAll()
+        self.b_p_m_val = self.b_p_m_val + 1
+        # TODO: DoCmd.RunCommand acCmdSave
+        # TODO: ResetAll
 
     def ResetAll(self) -> None:
-        self.BR.Left = 500
+        # TODO: Me.BR.Left = 500
         Counter = 0
-        Timin = datetime.datetime.now().time()
+        # TODO: Timin = Time
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

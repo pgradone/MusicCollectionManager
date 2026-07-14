@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: Artists
-Generated: 2026-07-14 15:57:48
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class Artists(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("Artists")
         self.setObjectName("Artists")
         self.resize(461, 417)
@@ -57,14 +60,18 @@ class Artists(QMainWindow):
         self.name.setText("Name")
         self.name.setGeometry(67, 32, 106, 2)
 
-        self.name.doubleClicked.connect(self.Name_DblClick)
+        self.name.installEventFilter(self)
+        self._dbl_click_widgets.add(self.name)
+        # DblClick -> self.Name_DblClick (via eventFilter)
 
         self.surname = QLineEdit(self.central_widget)
         self.surname.setObjectName("Surname")
         self.surname.setText("Surname")
         self.surname.setGeometry(240, 32, 182, 2)
 
-        self.surname.doubleClicked.connect(self.Surname_DblClick)
+        self.surname.installEventFilter(self)
+        self._dbl_click_widgets.add(self.surname)
+        # DblClick -> self.Surname_DblClick (via eventFilter)
 
         self.artist_combo = QComboBox(self.central_widget)
         self.artist_combo.setObjectName("ArtistCombo")
@@ -120,13 +127,13 @@ class Artists(QMainWindow):
 
           # NewIDMgt.AddNewID "ArtistID", "FreeArtistIDs"
 
-        MyFirstControl: str = None
+        MyFirstControl: str = ""
 
-        # DoCmd.GoToRecord , , acNewRec
+        # TODO: DoCmd.GoToRecord , , acNewRec
 
         MyFirstControl = "Name"
 
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyFirstControl
 
         # label: Exit_AddArtistButton_Click
         return
@@ -137,14 +144,14 @@ class Artists(QMainWindow):
 
     def ArtistCombo_AfterUpdate(self) -> None:
 
-        Criteria: str = None
+        Criteria: str = ""
         MyRS: Any = None
-        ActiveName: int = None
+        ActiveName: int = 0
 
         MyRS = self.RecordsetClone
 
           # Build the criteria.
-        ActiveName = self.focusWidget() if self.focusWidget() else ""
+        ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
         Criteria = "[ArtistID]=" + ActiveName
 
           # Perform the search.
@@ -152,14 +159,14 @@ class Artists(QMainWindow):
 
         if MyRS.NoMatch:
             QMessageBox.information(self, '', str("Not Found, Creating new record: " + ActiveName))
-            # DoCmd.GoToRecord , , A_NEWREC
-            self.ArtistID = self.ArtistCombo
+            # TODO: DoCmd.GoToRecord , , A_NEWREC
+            self.artist_i_d = self.artist_combo
             self.Refresh()
         else:
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
 
-        self.ArtistCombo = ""
+        self.artist_combo = ""
 
     def ArtistID_AfterUpdate(self) -> None:
         self.Refresh()
@@ -168,8 +175,8 @@ class Artists(QMainWindow):
         # VBA: On Error GoTo Err_ButtonDeleteArtist_Click
 
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
 
         # label: Exit_ButtonDeleteArtist_Click
         return
@@ -181,7 +188,7 @@ class Artists(QMainWindow):
     def ButtonPreviousArtist_Click(self) -> None:
         # VBA: On Error GoTo Err_ButtonPreviousArtist_Click
 
-        # DoCmd.GoToRecord , , A_PREVIOUS
+        # TODO: DoCmd.GoToRecord , , A_PREVIOUS
 
         # label: Exit_ButtonPreviousArtist_Click
         return
@@ -191,16 +198,17 @@ class Artists(QMainWindow):
         # VBA: Resume Exit_ButtonPreviousArtist_Click
 
     def Form_AfterUpdate(self) -> None:
-        self.ArtistCombo.Requery()
+        # TODO: self.artist_combo.Requery()
         ArtistDuplicates()
 
     def Form_BeforeInsert(self, Cancel: int) -> None:
-        BuildNewID(self.Name, "ArtistID")
+        # TODO: BuildNewID Me.Name, "ArtistID"
+        pass
 
     def Name_DblClick(self, Cancel: int) -> None:
         # VBA: On Error GoTo Err_Name_DblClick
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
         # label: Exit_Name_DblClick
         return
@@ -212,7 +220,7 @@ class Artists(QMainWindow):
     def Surname_DblClick(self, Cancel: int) -> None:
         # VBA: On Error GoTo Err_title_dblClick
 
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
         # label: Exit_Button48_Click
         return
@@ -224,15 +232,44 @@ class Artists(QMainWindow):
     def ArtistDuplicates(self) -> bool:
         qdf: Any = None
         rst: Any = None
-        sqlTxT: str = None
+        sqlTxT: str = ""
         # VBA: On Error Resume Next
-        sqlTxT = "SELECT Count([Artists].[Name] + [Artists].[Surname]) AS Duplications, " + "[Artists].[Name] + ' ' + [Artists].[Surname] AS DuplicatedArtist " + "FROM Artists WHERE ([Artists].[Name] + [Artists].[Surname])= '" + self.Name.strip() + self.Surname.strip() + "' " + "GROUP BY Artists.Name + ' ' + Artists.Surname " + "HAVING (((Count([Artists].[Name] + [Artists].[Surname]))>1)) "
-        rst = CurrentDb.OpenRecordset(sqlTxT)
+        sqlTxT = "SELECT Count([Artists].[Name] + [Artists].[Surname]) AS Duplications, " + "[Artists].[Name] + ' ' + [Artists].[Surname] AS DuplicatedArtist " + "FROM Artists WHERE ([Artists].[Name] + [Artists].[Surname])= '" + self.name.text().strip() + self.surname.text().strip() + "' " + "GROUP BY Artists.Name + ' ' + Artists.Surname " + "HAVING (((Count([Artists].[Name] + [Artists].[Surname]))>1)) "
+        # TODO: Set rst = CurrentDb.OpenRecordset(sqlTxT)
         # With rst:
         if rst.RecordCount >=  1:
             QMessageBox.information(self, '', str("the artist " + "" + "already exists"))
             ArtistDuplicates = True
         rst.Close()
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":

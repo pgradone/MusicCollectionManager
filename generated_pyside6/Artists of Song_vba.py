@@ -1,21 +1,21 @@
 
 def ArtistCombo_AfterUpdate(self) -> None:
 
-    # Forms! reference: RelationsMgt.AddFromCombo Forms!Songs![SongID], "Title", self.ArtistCombo, "SongID", "ArtistID", "Songs", "Sing"
+    # Forms! reference: RelationsMgt.AddFromCombo Forms!Songs![SongID], "Title", self.artist_combo, "SongID", "ArtistID", "Songs", "Sing"
     pass
 
 def ArtistCombo_NotInList(self, NewData: str, Response: int) -> None:
 
-    ActiveID: int = None
-    NewID: int = None
+    ActiveID: int = 0
+    NewID: int = 0
     GetText: Any = None
-    Prompt: str = None
-    Message: str = None
-    CRLF: str = None
-    ActiveName: str = None
-    MyQuery: str = None
-    MyID: str = None
-    MyFirstControl: str = None
+    Prompt: str = ""
+    Message: str = ""
+    CRLF: str = ""
+    ActiveName: str = ""
+    MyQuery: str = ""
+    MyID: str = ""
+    MyFirstControl: str = ""
     # VBA Const: MB_ICONQUESTION = 32
     # VBA Const: YES = 6
     # VBA Const: YES_NO = 4
@@ -25,7 +25,7 @@ def ArtistCombo_NotInList(self, NewData: str, Response: int) -> None:
       # Debug.Print GetText
 
     Message = GetText + " not found" + CRLF
-    if MsgBox(Message + Prompt, MB_ICONQUESTION + YES_NO, "Create new?")  ==  YES:
+    if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
 
           # like ButtonAddArtist_Click
 
@@ -33,42 +33,40 @@ def ArtistCombo_NotInList(self, NewData: str, Response: int) -> None:
         MyID = "ArtistID"
         MyFirstControl = "Name"
 
-        # DoCmd.OpenQuery MyQuery
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_COPY
-        self.close()
-        import Artists
-        self.sub_form = Artists.Artists()
-        self.sub_form.show()
-        # DoCmd.GoToRecord A_FORM, "Artists", A_NEWREC
-        # DoCmd.GoToControl MyID
-        # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_PASTE
+        # TODO: DoCmd.OpenQuery MyQuery
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_COPY
+        # TODO: DoCmd.Close A_QUERY, MyQuery
+        # TODO: DoCmd.OpenForm "Artists"
+        # TODO: DoCmd.GoToRecord A_FORM, "Artists", A_NEWREC
+        # TODO: DoCmd.GoToControl MyID
+        # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_PASTE
         # Forms! reference: Forms!Artists!Name = GetText
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyFirstControl
     # Forms! reference: Forms!Songs!ArtistCombo = ""
     # Forms! reference: Forms!Songs.Refresh
 
 def ArtistID_DblClick(self, Cancel: int) -> None:
 
-    GotoCriteria: str = None
-    MyForm: str = None
-    MyKey: str = None
-    MyFirstControl: str = None
+    GotoCriteria: str = ""
+    MyForm: str = ""
+    MyKey: str = ""
+    MyFirstControl: str = ""
 
-    if self.focusWidget() if self.focusWidget() else "" != "":
+    if str(self.focusWidget()) if self.focusWidget() else "" != "":
         MyForm = "Artists"
         MyKey = "ArtistID"
         MyFirstControl = "Name"
 
-        GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+        GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
         # TODO: DoCmd.OpenForm MyForm
-        # DoCmd.GoToControl MyKey
-        # DoCmd.FindRecord GotoCriteria
-        # DoCmd.GoToControl MyFirstControl
+        # TODO: DoCmd.GoToControl MyKey
+        # TODO: DoCmd.FindRecord GotoCriteria
+        # TODO: DoCmd.GoToControl MyFirstControl
 
 def Button13_Click(self) -> None:
     pass
 
 def ButtonRemoveSinger_Click(self) -> None:
 
-    # Forms! reference: RelationsMgt.RemoveFromButton "Sing", self.ArtistID, Forms!Songs![SongID], "Title"
+    # Forms! reference: RelationsMgt.RemoveFromButton "Sing", self.artist_i_d, Forms!Songs![SongID], "Title"
     pass

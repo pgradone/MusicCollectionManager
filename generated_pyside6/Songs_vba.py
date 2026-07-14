@@ -1,7 +1,7 @@
 
 def BPM_DblClick(self, Cancel: int) -> None:
 
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
     pass
 
 def ButtonAddSong_Click(self) -> None:
@@ -9,11 +9,11 @@ def ButtonAddSong_Click(self) -> None:
 
       # NewIDMgt.AddNewID "SongID", "FreeSongIDs"
 
-    MyFirstControl: str = None
-    # DoCmd.GoToRecord , , acNewRec
+    MyFirstControl: str = ""
+    # TODO: DoCmd.GoToRecord , , acNewRec
     MyFirstControl = "Title"
 
-    # DoCmd.GoToControl MyFirstControl
+    # TODO: DoCmd.GoToControl MyFirstControl
 
     # label: Exit_ButtonAddSong_Click
     return
@@ -25,8 +25,8 @@ def ButtonAddSong_Click(self) -> None:
 def ButtonDeleteSong_Click(self) -> None:
     # VBA: On Error GoTo Err_ButtonDeleteSong_Click
 
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
 
     # label: Exit_ButtonDeleteSong_Click
     return
@@ -39,28 +39,29 @@ def Field37_AfterUpdate(self) -> None:
 
     MyDb: Any = None
     MyTable: Any = None
-    MyDb = DBEngine.Workspaces(0).Databases(0)
-    MyTable = MyDb.OpenRecordset("Contain", DB_OPEN_TABLE)
+    # TODO: Set MyDb = DBEngine.Workspaces(0).Databases(0)
+    MyTable = MyDb.OpenRecordset("Contain", 1)
     MyTable.Index = "PrimaryKey"
     MyTable.AddNew()
-    MyTable["SongID"] = self.SongCombo
-    MyTable["RecordID"] = self.RecordID
+    MyTable["SongID"] = self.song_combo
+    MyTable["RecordID"] = self.record_i_d
     MyTable.Update()
     MyTable.Close()
     self.Refresh()
-    self.SongCombo = ""
+    self.song_combo = ""
 
 def Form_BeforeInsert(self, Cancel: int) -> None:
-    BuildNewID(self.Name, "SongID")
+    # TODO: BuildNewID Me.Name, "SongID"
+    pass
 
 def SongCombo_AfterUpdate(self) -> None:
 
-    Criteria: str = None
+    Criteria: str = ""
     MyRS: Any = None
-    ActiveName: str = None
-    Prompt: str = None
-    Message: str = None
-    CRLF: str = None
+    ActiveName: str = ""
+    Prompt: str = ""
+    Message: str = ""
+    CRLF: str = ""
     # VBA Const: MB_ICONQUESTION = 32
     # VBA Const: YES = 6
     # VBA Const: YES_NO = 4
@@ -70,38 +71,38 @@ def SongCombo_AfterUpdate(self) -> None:
     MyRS = self.RecordsetClone
 
       # Build the criteria.
-    ActiveName = self.focusWidget() if self.focusWidget() else ""
+    ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
     Criteria = "[SongID] = " + ActiveName
       # Perform the search.
     MyRS.FindFirst(Criteria)
 
     if MyRS.NoMatch:
         Message = ActiveName + " not found" + CRLF
-        if MsgBox(Message + Prompt, MB_ICONQUESTION + YES_NO, "Create new Song")  ==  YES:
-            # DoCmd.GoToRecord , , A_NEWREC
-            self.SongID = self.SongCombo
+        if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
+            # TODO: DoCmd.GoToRecord , , A_NEWREC
+            self.song_i_d = self.song_combo
             self.Refresh()
     else:
           # Synchronize the form's record to the dynaset's record.
         self.Bookmark = MyRS.Bookmark
 
-    self.SongCombo = ""
+    self.song_combo = ""
 
 def SongID_AfterUpdate(self) -> None:
     self.Refresh()
 
 def SongID_DblClick(self, Cancel: int) -> None:
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
     pass
 
 def Time_DblClick(self, Cancel: int) -> None:
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
     pass
 
 def Title_DblClick(self, Cancel: int) -> None:
     # VBA: On Error GoTo Err_title_dblClick
 
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
     # label: Exit_Button48_Click
     return
@@ -111,5 +112,5 @@ def Title_DblClick(self, Cancel: int) -> None:
     # VBA: Resume Exit_Button48_Click
 
 def Year_DblClick(self, Cancel: int) -> None:
-    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+    # TODO: DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
     pass

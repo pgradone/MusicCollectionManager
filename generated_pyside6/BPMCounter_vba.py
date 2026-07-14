@@ -1,31 +1,35 @@
+# VBA Dim: Timin As Date, Counter, Secs As Double
 
-def BPMVal_AfterUpdate(self) -> None:
-    ResetAll()
+    def BPMVal_AfterUpdate(self) -> None:
+        # TODO: ResetAll
+        pass
 
-def Form_Load(self) -> None:
-    ResetAll()
+    def Form_Load(self) -> None:
+        # TODO: ResetAll
+        pass
 
-def CommandReset_Click(self) -> None:
-    ResetAll()
+    def CommandReset_Click(self) -> None:
+        # TODO: ResetAll
+        pass
 
-def Form_Timer(self) -> None:
-    Secs = str(datetime.datetime.now().time() - Timin)
-    self.Timing = Secs
-    Counter = Secs * self.BPMVal / 60
-    self.Count = Counter
-    self.BR.Left = 500 + 2000 * (Counter - Int(Counter))
+    def Form_Timer(self) -> None:
+        # TODO: Secs = Format(Time - Timin, "s")
+        self.timing = Secs
+        Counter = Secs * self.b_p_m_val / 60
+        self.count = Counter
+        # TODO: Me.BR.Left = 500 + 2000 * (Counter - Int(Counter))
 
-def MinusOne_Click(self) -> None:
-    self.BPMVal = self.BPMVal - 1
-    # DoCmd.RunCommand acCmdSave
-    ResetAll()
+    def MinusOne_Click(self) -> None:
+        self.b_p_m_val = self.b_p_m_val - 1
+        # TODO: DoCmd.RunCommand acCmdSave
+        # TODO: ResetAll
 
-def PlusOne_Click(self) -> None:
-    self.BPMVal = self.BPMVal + 1
-    # DoCmd.RunCommand acCmdSave
-    ResetAll()
+    def PlusOne_Click(self) -> None:
+        self.b_p_m_val = self.b_p_m_val + 1
+        # TODO: DoCmd.RunCommand acCmdSave
+        # TODO: ResetAll
 
-def ResetAll(self) -> None:
-    self.BR.Left = 500
-    Counter = 0
-    Timin = datetime.datetime.now().time()
+    def ResetAll(self) -> None:
+        # TODO: Me.BR.Left = 500
+        Counter = 0
+        # TODO: Timin = Time

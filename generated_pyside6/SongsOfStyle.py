@@ -1,10 +1,12 @@
 """
 Auto-generated PySide6 form: SongsOfStyle
-Generated: 2026-07-14 15:57:49
+Generated: 2026-07-14 17:13:42
 """
 
 import sys
-from PySide6.QtCore import Qt, Slot, QTimer
+import datetime
+from typing import Any
+from PySide6.QtCore import Qt, Slot, QTimer, QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QGroupBox, QLabel, QLineEdit, QTextEdit, QPushButton,
@@ -22,6 +24,7 @@ class SongsOfStyle(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dbl_click_widgets: set[QObject] = set()
         self.setWindowTitle("Songs of Style")
         self.setObjectName("SongsOfStyle")
         self.resize(461, 400)
@@ -106,7 +109,9 @@ class SongsOfStyle(QMainWindow):
         self.song_i_d.setText("SongID")
         self.song_i_d.setGeometry(1, 1, 48, 2)
 
-        self.song_i_d.doubleClicked.connect(self.SongID_DblClick)
+        self.song_i_d.installEventFilter(self)
+        self._dbl_click_widgets.add(self.song_i_d)
+        # DblClick -> self.SongID_DblClick (via eventFilter)
 
         self.songs__title = QLineEdit(self.central_widget)
         self.songs__title.setObjectName("Songs.Title")
@@ -150,20 +155,20 @@ class SongsOfStyle(QMainWindow):
         MyDb: Any = None
         MyTable: Any = None
         MyQuery: Any = None
-        MyDb = DBEngine.Workspaces(0).Databases(0)
-        MyTable = MyDb.OpenRecordset("Sing", DB_OPEN_TABLE)
+        # TODO: Set MyDb = DBEngine.Workspaces(0).Databases(0)
+        MyTable = MyDb.OpenRecordset("Sing", 1)
 
         MyTable.Index = "PrimaryKey"
-        # Forms! reference: MyTable.Seek "=", Forms!Employees![EmployeeID], self.CompanyID
+        # Forms! reference: MyTable.Seek "=", Forms!Employees![EmployeeID], self.company_i_d
 
         if not MyTable.NoMatch:
             MyTable.Delete()
         MyTable.Close()
-        Forms.Artistss.Refresh()
+        # TODO: Forms.Artistss.Refresh()
 
     def ButtonRemoveSong_Click(self) -> None:
 
-        # Forms! reference: RelationsMgt.RemoveFromButton "Belong", self.SongID, Forms!Styles![StyleID], "Label"
+        # Forms! reference: RelationsMgt.RemoveFromButton "Belong", self.song_i_d, Forms!Styles![StyleID], "Label"
 
           # Dim MyDB As DATABASE, MyTable As Recordset, MyQuery As QueryDef
           # Set MyDB = DBEngine.Workspaces(0).Databases(0)
@@ -181,36 +186,65 @@ class SongsOfStyle(QMainWindow):
 
     def RecordID_DblClick(self, Cancel: int) -> None:
 
-        FormName: str = None
-        LinkCriteria: str = None
+        FormName: str = ""
+        LinkCriteria: str = ""
 
         FormName = "Records"
-        if self.RecordID != "":
-            LinkCriteria = "[RecordID]=" + self.focusWidget() if self.focusWidget() else ""
+        if self.record_i_d != "":
+            LinkCriteria = "[RecordID]=" + str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm FormName, , , LinkCriteria
 
     def SongCombo_AfterUpdate(self) -> None:
 
-        # Forms! reference: RelationsMgt.AddFromCombo Forms!Styles![StyleID], "Label", self.SongCombo, "StyleID", "SongID", "Styles", "Belong"
+        # Forms! reference: RelationsMgt.AddFromCombo Forms!Styles![StyleID], "Label", self.song_combo, "StyleID", "SongID", "Styles", "Belong"
         pass
 
     def SongID_DblClick(self, Cancel: int) -> None:
 
-        GotoCriteria: str = None
-        MyForm: str = None
-        MyKey: str = None
-        MyFirstControl: str = None
+        GotoCriteria: str = ""
+        MyForm: str = ""
+        MyKey: str = ""
+        MyFirstControl: str = ""
 
-        if self.focusWidget() if self.focusWidget() else "" != "":
+        if str(self.focusWidget()) if self.focusWidget() else "" != "":
             MyForm = "Songs"
             MyKey = "SongID"
             MyFirstControl = "Title"
 
-            GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+            GotoCriteria = str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
+            # TODO: DoCmd.GoToControl MyKey
+            # TODO: DoCmd.FindRecord GotoCriteria
+            # TODO: DoCmd.GoToControl MyFirstControl
+
+    # Access form compatibility stubs
+    @property
+    def RecordsetClone(self) -> Any:
+        return None
+
+    @property
+    def Bookmark(self) -> Any:
+        return None
+
+    @Bookmark.setter
+    def Bookmark(self, value: Any) -> None:
+        pass
+
+    def Refresh(self) -> None:
+        pass
+
+    def Requery(self) -> None:
+        pass
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj in self._dbl_click_widgets:
+                handler_name = f"{obj.objectName()}_DblClick"
+                handler = getattr(self, handler_name, None)
+                if handler:
+                    handler()
+                    return True
+        return super().eventFilter(obj, event)
 
 
 if __name__ == "__main__":
