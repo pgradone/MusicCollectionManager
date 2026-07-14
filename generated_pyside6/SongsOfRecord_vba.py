@@ -1,33 +1,31 @@
-class SongsOfRecordVbaStub:
-    """Compatibility stub for generated VBA form logic.
 
-    This file is not executed by the PySide application. It only exists so
-    generated VBA-style handlers can be inspected without Pylance parsing
-    invalid Visual Basic syntax.
-    """
+def ButtonOpenAllSongs_Click(self) -> None:
+    pass
 
-    def ButtonOpenAllSongs_Click(self) -> None:
-        """Placeholder for the Open All Songs button handler."""
-        pass
+def ButtonRemoveSong_Click(self) -> None:
 
-    def ButtonRemoveSong_Click(self) -> None:
-        """Placeholder for the Remove Song relationship handler."""
-        pass
+    # Forms! reference: RelationsMgt.RemoveFromButton "Contain", Forms!Records![RecordID], self.SongID, "RecordHouse"
+    pass
 
-    def SongCombo_AfterUpdate(self) -> None:
-        """Placeholder for the combo-box after-update handler."""
-        pass
+def SongCombo_AfterUpdate(self) -> None:
 
-    def SongID_DblClick(self, Cancel: int) -> None:
-        """Placeholder for the double-click handler."""
-        GotoCriteria: str | None = None
-        MyKey: str | None = None
-        MyForm: str | None = None
-        MyFirstControl: str | None = None
+    # Forms! reference: RelationsMgt.AddFromCombo Forms!Records![RecordID], "RecordHouse", self.SongCombo, "RecordID", "SongID", "Records", "Contain"
+    pass
 
-        if False:
-            MyForm = "Songs"
-            MyKey = "SongID"
-            MyFirstControl = "Title"
-            GotoCriteria = ""
-            _ = (MyForm, MyKey, MyFirstControl, GotoCriteria)
+def SongID_DblClick(self, Cancel: int) -> None:
+
+    GotoCriteria: str = None
+    MyForm: str = None
+    MyKey: str = None
+    MyFirstControl: str = None
+
+    if self.focusWidget() if self.focusWidget() else "" != "":
+        MyForm = "Songs"
+        MyKey = "SongID"
+        MyFirstControl = "Title"
+
+        GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+        # TODO: DoCmd.OpenForm MyForm
+        # DoCmd.GoToControl MyKey
+        # DoCmd.FindRecord GotoCriteria
+        # DoCmd.GoToControl MyFirstControl

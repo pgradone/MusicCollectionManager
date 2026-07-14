@@ -1,146 +1,150 @@
 
-    def ArtistID_DblClick(self, Cancel: int) -> None:
-        GotoCriteria: str = None
-        MyKey: str = None
+def ArtistID_DblClick(self, Cancel: int) -> None:
+    GotoCriteria: str = None
+    MyForm: str = None
+    MyKey: str = None
+    MyFirstControl: str = None
 
-        if Screen.ActiveControl != "":
-            MyForm = "Artists"
-            MyKey = "ArtistID"
-            MyFirstControl = "Name"
+    if self.focusWidget() if self.focusWidget() else "" != "":
+        MyForm = "Artists"
+        MyKey = "ArtistID"
+        MyFirstControl = "Name"
 
-            GotoCriteria = Screen.ActiveControl
-            # DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
+        GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+        # TODO: DoCmd.OpenForm MyForm
+        # DoCmd.GoToControl MyKey
+        # DoCmd.FindRecord GotoCriteria
+        # DoCmd.GoToControl MyFirstControl
 
-    def ButtonAddRecord_Click(self) -> None:
-        # VBA: On Error GoTo Err_ButtonAddRecord_Click
-        # try:
+def ButtonAddRecord_Click(self) -> None:
+    # VBA: On Error GoTo Err_ButtonAddRecord_Click
 
-            NewIDMgt.AddNewID "RecordID", "FreeRecordIDs"
+    NewIDMgt.AddNewID("RecordID", "FreeRecordIDs")
 
-            MyFirstControl: str = None
-            MyFirstControl = "Title"
+    MyFirstControl: str = None
+    MyFirstControl = "Title"
 
-            # DoCmd.GoToControl MyFirstControl
+    # DoCmd.GoToControl MyFirstControl
 
-            # label: Exit_ButtonAddRecord_Click
+    # label: Exit_ButtonAddRecord_Click
+    return
 
-        # label: Err_ButtonAddRecord_Click
-        QMessageBox.information(self, '', str(E))
-        # VBA: Resume Exit_ButtonAddRecord_Click
+    # label: Err_ButtonAddRecord_Click
+    QMessageBox.information(self, '', str("Unknown error"))
+    # VBA: Resume Exit_ButtonAddRecord_Click
 
-    def ButtonDelRecord_Click(self) -> None:
-        # VBA: On Error GoTo Err_ButtonDelRecord_Click
-        # try:
-
-
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
-
-            # label: Exit_ButtonDelRecord_Click
-
-        # label: Err_ButtonDelRecord_Click
-        QMessageBox.information(self, '', str(E))
-        # VBA: Resume Exit_ButtonDelRecord_Click
-
-    def ButtonFindRecord_Click(self) -> None:
-        # VBA: On Error GoTo Err_ButtonFindRecord_Click
-        # try:
-
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
-
-            # label: Exit_ButtonFindRecord_Click
-
-        # label: Err_ButtonFindRecord_Click
-        QMessageBox.information(self, '', str(E))
-        # VBA: Resume Exit_ButtonFindRecord_Click
-
-    def ButtonPrintRecord_Click(self) -> None:
-        # VBA: On Error GoTo Err_ButtonPrintRecord_Click
-        # try:
+def ButtonDelRecord_Click(self) -> None:
+    # VBA: On Error GoTo Err_ButtonDelRecord_Click
 
 
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
-            # DoCmd.PrintOut A_SELECTION
+    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_DELETE_V2, , A_MENU_VER20
 
-            # label: Exit_ButtonPrintRecord_Click
+    # label: Exit_ButtonDelRecord_Click
+    return
 
-        # label: Err_ButtonPrintRecord_Click
-        QMessageBox.information(self, '', str(E))
-        # VBA: Resume Exit_ButtonPrintRecord_Click
+    # label: Err_ButtonDelRecord_Click
+    QMessageBox.information(self, '', str("Unknown error"))
+    # VBA: Resume Exit_ButtonDelRecord_Click
 
-    def Form_BeforeInsert(self, Cancel: int) -> None:
-        BuildNewID self.Name, "RecordID"
+def ButtonFindRecord_Click(self) -> None:
+    # VBA: On Error GoTo Err_ButtonFindRecord_Click
 
-    def Form_Current(self) -> None:
-        self.Refresh
+    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
 
-    def List51_DblClick(self, Cancel: int) -> None:
+    # label: Exit_ButtonFindRecord_Click
+    return
 
-        GotoCriteria: str = None
-        MyKey: str = None
+    # label: Err_ButtonFindRecord_Click
+    QMessageBox.information(self, '', str("Unknown error"))
+    # VBA: Resume Exit_ButtonFindRecord_Click
 
-        if Screen.ActiveControl != "":
-            MyForm = "Artists"
-            MyKey = "ArtistID"
-            MyFirstControl = "Name"
+def ButtonPrintRecord_Click(self) -> None:
+    # VBA: On Error GoTo Err_ButtonPrintRecord_Click
 
-            GotoCriteria = Screen.ActiveControl
-            # DoCmd.OpenForm MyForm
-            # DoCmd.GoToControl MyKey
-            # DoCmd.FindRecord GotoCriteria
-            # DoCmd.GoToControl MyFirstControl
 
-    def RecordCombo_AfterUpdate(self) -> None:
+    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_SELECTRECORD_V2, , A_MENU_VER20
+    # DoCmd.PrintOut A_SELECTION
 
-        Criteria: str = None
-        MyRS: Any = None
-        ActiveName: int = None
+    # label: Exit_ButtonPrintRecord_Click
+    return
 
-        MyRS = self.RecordsetClone
+    # label: Err_ButtonPrintRecord_Click
+    QMessageBox.information(self, '', str("Unknown error"))
+    # VBA: Resume Exit_ButtonPrintRecord_Click
 
-        # Build the criteria.
-        ActiveName = Screen.ActiveControl
-        Criteria = "[RecordID]=" + ActiveName
+def Form_BeforeInsert(self, Cancel: int) -> None:
+    BuildNewID(self.Name, "RecordID")
 
-        # Perform the search.
-        MyRS.FindFirst Criteria
+def Form_Current(self) -> None:
+    self.Refresh()
 
-        if MyRS.NoMatch:
-            QMessageBox.information(self, '', str("))
-            # DoCmd.GoToRecord , , A_NEWREC
-            self.RecordID = self.RecordCombo
-            self.Refresh
-        else:
-            # Synchronize the form's record to the dynaset's record.
-            self.Bookmark = MyRS.Bookmark
+def List51_DblClick(self, Cancel: int) -> None:
 
-        self.RecordCombo = ""
+    GotoCriteria: str = None
+    MyForm: str = None
+    MyKey: str = None
+    MyFirstControl: str = None
 
-    def RecordID_AfterUpdate(self) -> None:
-        self.Refresh
+    if self.focusWidget() if self.focusWidget() else "" != "":
+        MyForm = "Artists"
+        MyKey = "ArtistID"
+        MyFirstControl = "Name"
 
-    def SongView_AfterUpdate(self) -> None:
+        GotoCriteria = self.focusWidget() if self.focusWidget() else ""
+        # TODO: DoCmd.OpenForm MyForm
+        # DoCmd.GoToControl MyKey
+        # DoCmd.FindRecord GotoCriteria
+        # DoCmd.GoToControl MyFirstControl
 
-        ActiveValue: str = None
+def RecordCombo_AfterUpdate(self) -> None:
 
-        ActiveValue = Screen.ActiveControl
-        if ActiveValue = "Form":
-            self.SongsInRecord.SourceObject = "Songs"
-        if ActiveValue = "Tabular":
-            self.SongsInRecord.SourceObject = "SongsOfRecord"
+    Criteria: str = None
+    MyRS: Any = None
+    ActiveName: int = None
 
-    def Title_DblClick(self, Cancel: int) -> None:
+    MyRS = self.RecordsetClone
 
-        # VBA: On Error GoTo Err_title_dblClick
-        # try:
+      # Build the criteria.
+    ActiveName = self.focusWidget() if self.focusWidget() else ""
+    Criteria = "[RecordID]=" + ActiveName
 
-            # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+      # Perform the search.
+    MyRS.FindFirst(Criteria)
 
-            # label: Exit_Button48_Click
+    if MyRS.NoMatch:
+        QMessageBox.information(self, '', str("Not Found, Creating new record: " + ActiveName))
+        # DoCmd.GoToRecord , , A_NEWREC
+        self.RecordID = self.RecordCombo
+        self.Refresh()
+    else:
+          # Synchronize the form's record to the dynaset's record.
+        self.Bookmark = MyRS.Bookmark
 
-        # label: Err_title_dblClick
-        QMessageBox.information(self, '', str(E))
-        # VBA: Resume Exit_Button48_Click
+    self.RecordCombo = ""
+
+def RecordID_AfterUpdate(self) -> None:
+    self.Refresh()
+
+def SongView_AfterUpdate(self) -> None:
+
+    ActiveValue: str = None
+
+    ActiveValue = self.focusWidget() if self.focusWidget() else ""
+    if ActiveValue  ==  "Form":
+        self.SongsInRecord.SourceObject = "Songs"
+    if ActiveValue  ==  "Tabular":
+        self.SongsInRecord.SourceObject = "SongsOfRecord"
+
+def Title_DblClick(self, Cancel: int) -> None:
+
+    # VBA: On Error GoTo Err_title_dblClick
+
+    # DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, 10, , A_MENU_VER20
+
+    # label: Exit_Button48_Click
+    return
+
+    # label: Err_title_dblClick
+    QMessageBox.information(self, '', str("Unknown error"))
+    # VBA: Resume Exit_Button48_Click
