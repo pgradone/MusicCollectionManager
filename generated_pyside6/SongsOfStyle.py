@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: SongsOfStyle
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -190,13 +190,13 @@ class SongsOfStyle(QMainWindow):
         LinkCriteria: str = ""
 
         FormName = "Records"
-        if self.record_i_d != "":
-            LinkCriteria = "[RecordID]=" + str(self.focusWidget()) if self.focusWidget() else ""
+        # TODO: if self.record_i_d != "":
+            # TODO: LinkCriteria = "[RecordID]=" + str(self.focusWidget()) if self.focusWidget() else ""
             # TODO: DoCmd.OpenForm FormName, , , LinkCriteria
 
-    def SongCombo_AfterUpdate(self) -> None:
+    # TODO: def SongCombo_AfterUpdate(self) -> None:
 
-        # Forms! reference: RelationsMgt.AddFromCombo Forms!Styles![StyleID], "Label", self.song_combo, "StyleID", "SongID", "Styles", "Belong"
+        # Forms! reference: RelationsMgt.AddFromCombo Forms!Styles![StyleID], "Label", self.song_combo.currentText(), "StyleID", "SongID", "Styles", "Belong"
         pass
 
     def SongID_DblClick(self, Cancel: int) -> None:
@@ -246,6 +246,8 @@ class SongsOfStyle(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

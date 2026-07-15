@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Records
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -286,14 +286,14 @@ class Records(QMainWindow):
         MyRS = self.RecordsetClone
 
           # Build the criteria.
-        ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
-        Criteria = "[RecordID]=" + ActiveName
+        ActiveName = int(str(self.focusWidget())) if self.focusWidget() else 0
+        Criteria = "[RecordID]=" + str(str(ActiveName))
 
           # Perform the search.
         MyRS.FindFirst(Criteria)
 
         if MyRS.NoMatch:
-            QMessageBox.information(self, '', str("Not Found, Creating new record: " + ActiveName))
+            QMessageBox.information(self, '', str("Not Found, Creating new record: " + str(str(ActiveName))))
             # TODO: DoCmd.GoToRecord , , A_NEWREC
             self.record_i_d = self.record_combo
             self.Refresh()
@@ -301,7 +301,8 @@ class Records(QMainWindow):
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
 
-        self.record_combo = ""
+        self.record_combo.setCurrentText("")
+
 
     def RecordID_AfterUpdate(self) -> None:
         self.Refresh()
@@ -360,6 +361,8 @@ class Records(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Records of Song
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -184,7 +184,7 @@ class Records_of_Song(QMainWindow):
 
     def ButtonRemoveRecord_Click(self) -> None:
 
-        # Forms! reference: RelationsMgt.RemoveFromButton "Contain", self.record_i_d, Forms!Songs![SongID], "BPM"
+        # Forms! reference: RelationsMgt.RemoveFromButton "Contain", self.record_i_d.currentText(), Forms!Songs![SongID], "BPM"
         pass
 
     def RecordCombo_AfterUpdate(self) -> None:
@@ -210,7 +210,7 @@ class Records_of_Song(QMainWindow):
         # VBA Const: YES_NO = 4
         CRLF = chr(13)
         Prompt = "Create Record?"
-        GetText = RecordCombo.text()
+        GetText = self.record_combo.currentText()
           # Debug.Print GetText
 
         Message = GetText + " not found" + CRLF
@@ -282,6 +282,8 @@ class Records_of_Song(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

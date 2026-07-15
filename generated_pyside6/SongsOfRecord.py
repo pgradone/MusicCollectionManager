@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: SongsOfRecord
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -168,7 +168,7 @@ class SongsOfRecord(QMainWindow):
 
     def SongCombo_AfterUpdate(self) -> None:
 
-        # Forms! reference: RelationsMgt.AddFromCombo Forms!Records![RecordID], "RecordHouse", self.song_combo, "RecordID", "SongID", "Records", "Contain"
+        # Forms! reference: RelationsMgt.AddFromCombo Forms!Records![RecordID], "RecordHouse", self.song_combo.currentText(), "RecordID", "SongID", "Records", "Contain"
         pass
 
     def SongID_DblClick(self, Cancel: int) -> None:
@@ -218,6 +218,8 @@ class SongsOfRecord(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

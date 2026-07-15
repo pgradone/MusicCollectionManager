@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: BPMCounter
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -109,6 +109,7 @@ class BPMCounter(QMainWindow):
         pass
 
     def Form_Timer(self) -> None:
+        Secs: Any = None
         # TODO: Secs = Format(Time - Timin, "s")
         self.timing = Secs
         Counter = Secs * self.b_p_m_val / 60
@@ -116,12 +117,14 @@ class BPMCounter(QMainWindow):
         # TODO: Me.BR.Left = 500 + 2000 * (Counter - Int(Counter))
 
     def MinusOne_Click(self) -> None:
-        self.b_p_m_val = self.b_p_m_val - 1
+        self.b_p_m_val.setText(str(int(self.b_p_m_val.text() or "0") - 1))
+
         # TODO: DoCmd.RunCommand acCmdSave
         # TODO: ResetAll
 
     def PlusOne_Click(self) -> None:
-        self.b_p_m_val = self.b_p_m_val + 1
+        self.b_p_m_val.setText(str(int(self.b_p_m_val.text() or "0") + 1))
+
         # TODO: DoCmd.RunCommand acCmdSave
         # TODO: ResetAll
 
@@ -159,6 +162,8 @@ class BPMCounter(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

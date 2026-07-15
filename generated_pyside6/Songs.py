@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Songs
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -214,12 +214,13 @@ class Songs(QMainWindow):
         MyTable = MyDb.OpenRecordset("Contain", 1)
         MyTable.Index = "PrimaryKey"
         MyTable.AddNew()
-        MyTable["SongID"] = self.song_combo
-        MyTable["RecordID"] = self.record_i_d
+        MyTable["SongID"] = self.song_combo.currentText()
+        MyTable["RecordID"] = ""  # TODO: self.record_i_d.currentText()
         MyTable.Update()
         MyTable.Close()
         self.Refresh()
-        self.song_combo = ""
+        self.song_combo.setCurrentText("")
+
 
     def Form_BeforeInsert(self, Cancel: int) -> None:
         # TODO: BuildNewID Me.Name, "SongID"
@@ -243,7 +244,7 @@ class Songs(QMainWindow):
 
           # Build the criteria.
         ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
-        Criteria = "[SongID] = " + ActiveName
+        Criteria = "[SongID] = " + str(str(ActiveName))
           # Perform the search.
         MyRS.FindFirst(Criteria)
 
@@ -251,13 +252,14 @@ class Songs(QMainWindow):
             Message = ActiveName + " not found" + CRLF
             if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
                 # TODO: DoCmd.GoToRecord , , A_NEWREC
-                self.song_i_d = self.song_combo
+                # TODO: self.song_i_d = self.song_combo.currentText()
                 self.Refresh()
         else:
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
 
-        self.song_combo = ""
+        self.song_combo.setCurrentText("")
+
 
     def SongID_AfterUpdate(self) -> None:
         self.Refresh()
@@ -315,6 +317,8 @@ class Songs(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

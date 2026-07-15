@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: StylesOfSong
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -151,7 +151,7 @@ class StylesOfSong(QMainWindow):
         # VBA Const: YES_NO = 4
         CRLF = chr(13)
         Prompt = "Create New Style?"
-        GetText = StyleCombo.text()
+        GetText = self.style_combo.currentText()
           # Debug.Print GetText
 
         Message = GetText + " not found" + CRLF
@@ -173,7 +173,8 @@ class StylesOfSong(QMainWindow):
             # TODO: DoCmd.GoToControl MyFirstControl
             # Forms! reference: Forms!Styles!Label = GetText
         # TODO: DoCmd.Close A_FORM, "Styles"
-        self.style_combo = ""
+        self.style_combo.setCurrentText("")
+
         self.Refresh()
 
     def StyleID_DblClick(self, Cancel: int) -> None:
@@ -223,6 +224,8 @@ class StylesOfSong(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

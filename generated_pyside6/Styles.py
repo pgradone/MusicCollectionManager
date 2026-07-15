@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Styles
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -155,7 +155,7 @@ class Styles(QMainWindow):
 
           # Build the criteria.
         ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
-        Criteria = "[StyleID] = " + ActiveName
+        Criteria = "[StyleID] = " + str(str(ActiveName))
           # Perform the search.
         MyRS.FindFirst(Criteria)
 
@@ -163,7 +163,7 @@ class Styles(QMainWindow):
             Message = ActiveName + " not found" + CRLF
             if QMessageBox.question(self, "", str(Message + Prompt), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)  ==  QMessageBox.StandardButton.Yes:
                 # TODO: DoCmd.GoToRecord , , A_NEWREC
-                self.song_i_d = self.song_combo
+                # TODO: self.song_i_d = self.song_combo.currentText()
                 self.Refresh()
         else:
               # Synchronize the form's record to the dynaset's record.
@@ -198,6 +198,8 @@ class Styles(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

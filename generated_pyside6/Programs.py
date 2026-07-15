@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Programs
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -246,7 +246,7 @@ class Programs(QMainWindow):
         # TODO: Set MyWS = DBEngine.Workspaces(0)
           # Set MyDB = MyWS.OpenDatabase(Myfile)
         # TODO: Set MyDb = CurrentDb
-        Criteria = "[SongID] = " + self.song_combo
+        Criteria = "[SongID] = " + self.song_combo.currentText()
         MySchedule = MyDb.OpenRecordset("Schedule", 1)
         MySongs = MyDb.OpenRecordset("Songs", 2)
         MyArtists = MyDb.OpenRecordset("Artists", 2)
@@ -285,7 +285,7 @@ class Programs(QMainWindow):
           # Loop
         # TODO: RecordsOfSong = Me.SongCombo.Column(3)
           # ********* Fill Fields with calculated contents
-        MySchedule["SongID"] = self.song_combo
+        MySchedule["SongID"] = self.song_combo.currentText()
         ArtistsOfSong = ArtistsOfSong.strip()
         MySchedule["Song_Artist"] = MySongs["Title"] + " * " + ArtistsOfSong[:int(79)]
         MySchedule["Record"] = RecordsOfSong.strip()[:int(79)]
@@ -298,7 +298,8 @@ class Programs(QMainWindow):
         MySongs.Close()
         MySing.Close()
         MyArtists.Close()
-        self.position_schedule = self.position_schedule + 1
+        self.position_schedule.setText(str(int(self.position_schedule.text() or "0") + 1))
+
         self.Refresh()
 
         # label: Exit_SongCombo_AfterUpdate
@@ -310,11 +311,11 @@ class Programs(QMainWindow):
         # VBA: Resume Exit_SongCombo_AfterUpdate
 
     def SupportChooseCombo_AfterUpdate(self) -> None:
-        # TODO: self.song_combo.Requery()
+        # TODO: self.song_combo.currentText().Requery()
         pass
 
     def CalcTTime(self) -> str:
-        TotTime: datetime.datetime = None
+        TotTime: datetime.datetime | None = None
         totRec: Any = None
         TotRecNull: int = 0
         sqlTxT: str = ""
@@ -322,8 +323,9 @@ class Programs(QMainWindow):
         CTT: str = ""
         CTT = ""
         if self.program_i_d is None:
-            return
-        sqlTxT = "SELECT Schedule.ProgramID, datetime.datetime.strptime(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5))))) AS Tim, datetime.datetime.strptime(CDate(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5)))))*(Count(TIme Is None if None else 'FulTim')+Count(TIme Is None if 'NulTim' else None))/Count(TIme Is None if None else 'FulTim')) AS AvgTim, Count(TIme Is None if None else 'FulTim') AS FullTim, Count(TIme Is None if 'NulTim' else None) AS NullTim FROM Songs INNER JOIN Schedule ON Songs.SongID = Schedule.SongID GROUP BY Schedule.ProgramID " + "HAVING ProgramID = " + self.program_i_d
+            return ""
+
+        sqlTxT = "SELECT Schedule.ProgramID, datetime.datetime.strptime(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5))))) AS Tim, datetime.datetime.strptime(CDate(Sum(datetime.datetime.now().time() Is None if None else CDate('00:' + str(datetime.datetime.now(.time()[:int(""hh:nn"")],5)))))*(Count(TIme Is None if None else 'FulTim')+Count(TIme Is None if 'NulTim' else None))/Count(TIme Is None if None else 'FulTim')) AS AvgTim, Count(TIme Is None if None else 'FulTim') AS FullTim, Count(TIme Is None if 'NulTim' else None) AS NullTim FROM Songs INNER JOIN Schedule ON Songs.SongID = Schedule.SongID GROUP BY Schedule.ProgramID " + "HAVING ProgramID = " + self.program_i_d.text()
           # sqltxt = "SELECT IIF(Time is null,NULL,'00:' & left(format(time,""hh:nn""),5)) AS Tim " &         "FROM Songs INNER JOIN Schedule on Songs.SongID = Schedule.SongID " &         "WHERE ProgramID = " & Me.ProgramID
         # TODO: Set rst = CurrentDb.OpenRecordset(sqlTxT)
           # Do While Not rst.EOF
@@ -341,7 +343,7 @@ class Programs(QMainWindow):
         rst.Close()
           # If totRec = 0 Then Exit Function
           # CTT = TotTime & " - " & CDate(TotTime * (totRec + TotRecNull) / totRec)
-        CalcTTime = CTT
+        return CTT
 
     # Access form compatibility stubs
     @property
@@ -372,6 +374,8 @@ class Programs(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

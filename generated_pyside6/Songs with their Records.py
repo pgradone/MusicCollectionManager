@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Songs with their Records
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -205,6 +205,8 @@ class Songs_with_their_Records(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

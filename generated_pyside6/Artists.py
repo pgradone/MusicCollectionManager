@@ -1,6 +1,6 @@
 """
 Auto-generated PySide6 form: Artists
-Generated: 2026-07-14 17:13:42
+Generated: 2026-07-15 08:57:01
 """
 
 import sys
@@ -151,14 +151,14 @@ class Artists(QMainWindow):
         MyRS = self.RecordsetClone
 
           # Build the criteria.
-        ActiveName = str(self.focusWidget()) if self.focusWidget() else ""
-        Criteria = "[ArtistID]=" + ActiveName
+        ActiveName = int(str(self.focusWidget())) if self.focusWidget() else 0
+        Criteria = "[ArtistID]=" + str(str(ActiveName))
 
           # Perform the search.
         MyRS.FindFirst(Criteria)
 
         if MyRS.NoMatch:
-            QMessageBox.information(self, '', str("Not Found, Creating new record: " + ActiveName))
+            QMessageBox.information(self, '', str("Not Found, Creating new record: " + str(str(ActiveName))))
             # TODO: DoCmd.GoToRecord , , A_NEWREC
             self.artist_i_d = self.artist_combo
             self.Refresh()
@@ -166,7 +166,8 @@ class Artists(QMainWindow):
               # Synchronize the form's record to the dynaset's record.
             self.Bookmark = MyRS.Bookmark
 
-        self.artist_combo = ""
+        self.artist_combo.setCurrentText("")
+
 
     def ArtistID_AfterUpdate(self) -> None:
         self.Refresh()
@@ -198,8 +199,10 @@ class Artists(QMainWindow):
         # VBA: Resume Exit_ButtonPreviousArtist_Click
 
     def Form_AfterUpdate(self) -> None:
+        pass
+
         # TODO: self.artist_combo.Requery()
-        ArtistDuplicates()
+        # TODO: ArtistDuplicates()
 
     def Form_BeforeInsert(self, Cancel: int) -> None:
         # TODO: BuildNewID Me.Name, "ArtistID"
@@ -239,7 +242,9 @@ class Artists(QMainWindow):
         # With rst:
         if rst.RecordCount >=  1:
             QMessageBox.information(self, '', str("the artist " + "" + "already exists"))
-            ArtistDuplicates = True
+            return True
+        return False
+
         rst.Close()
 
     # Access form compatibility stubs
@@ -271,6 +276,8 @@ class Artists(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
+
+        return False
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
