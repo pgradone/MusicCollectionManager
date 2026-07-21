@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
     def _related_relationships(self) -> list[tuple[str, str]]:
         relationships: dict[str, list[tuple[str, str]]] = {
             "Artists": [("Songs", "Sing")],
-            "Songs": [("Artists", "Sing"), ("Records", "Contain")],
+            "Songs": [("Artists", "Sing"), ("Records", "Contain"), ("Styles", "Belong")],
             "Records": [("Songs", "Contain")],
         }
         return relationships.get(self.current_table, [])
@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
             if fk is None:
                 continue
 
-            child_widget = self._build_related_table_widget(
+            child_widget = self._build_junction_subform(
                 relation_table,
                 title,
                 fk,
@@ -383,6 +383,318 @@ class MainWindow(QMainWindow):
         layout.addLayout(button_layout)
 
         return widget
+
+    def _build_junction_subform(
+        self,
+        junction_table: str,
+        title: str,
+        fk: sqlite3.Row,
+        primary_value: Any,
+    ) -> QWidget:
+        other_fk = [c for c in self.db.foreign_keys(junction_table) if c["from"] != fk["from"]][0]
+        target_table = other_fk["table"]
+        target_pk = self.db.primary_key(target_table)
+
+        target_columns = [c["name"] for c in self.db.columns(target_table)]
+        junction_fk_cols = {fk["from"], other_fk["from"]}
+        junction_extra_cols = [
+            c["name"] for c in self.db.columns(junction_table)
+            if c["name"] not in junction_fk_cols
+        ]
+        has_position = "Position" in junction_extra_cols
+
+        display_columns = junction_extra_cols + target_columns
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.addWidget(QLabel(f"{title} linked through {junction_table}"))
+
+        table = QTableWidget()
+        table.setColumnCount(len(display_columns))
+        table.setHorizontalHeaderLabels(display_columns)
+
+        extra_select = ", ".join(f"[{junction_table}].[{c}]" for c in junction_extra_cols)
+        target_select = ", ".join(f"[{target_table}].[{c}]" for c in target_columns)
+        select_clause = ", ".join(filter(None, [extra_select, target_select]))
+
+        order_clause = (
+            f"ORDER BY CAST([{junction_table}].[Position] AS INTEGER), [{junction_table}].[Position]"
+            if has_position else ""
+        )
+        join_on = f"[{target_table}].[{target_pk}] = [{junction_table}].[{other_fk['from']}]"
+        query = (
+            f"SELECT {select_clause} "
+            f"FROM [{junction_table}] "
+            f"INNER JOIN [{target_table}] ON {join_on} "
+            f"WHERE [{junction_table}].[{fk['from']}] = ? {order_clause}"
+        )
+        rows = self.db.fetchall(query, (primary_value,))
+
+        table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            other_fk_value = row[other_fk["from"]]
+            for col_idx, col_name in enumerate(display_columns):
+                value = row[col_name]
+                if col_name == "Position" and value is not None:
+                    try:
+                        pos_int = int(value)
+                    except (ValueError, TypeError):
+                        pos_int = None
+                    if pos_int is not None:
+                        spin = QSpinBox()
+                        spin.setRange(1, 99)
+                        spin.setValue(pos_int)
+                        spin.valueChanged.connect(
+                            lambda v, ov=other_fk_value, pv=primary_value:
+                            self._set_junction_field(junction_table, fk["from"], pv, other_fk["from"], ov, "Position", v)
+                        )
+                        table.setCellWidget(row_idx, col_idx, spin)
+                    else:
+                        item = QTableWidgetItem(str(value))
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        table.setItem(row_idx, col_idx, item)
+                else:
+                    item = QTableWidgetItem("" if value is None else str(value))
+                    if col_name not in junction_extra_cols:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    table.setItem(row_idx, col_idx, item)
+
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("Add")
+        del_btn = QPushButton("Remove")
+
+        add_btn.clicked.connect(
+            lambda: self._add_junction_relation(junction_table, fk, other_fk, primary_value, has_position, table)
+        )
+        del_btn.clicked.connect(
+            lambda: self._delete_junction_relation(junction_table, fk, other_fk, primary_value, display_columns, table)
+        )
+        btn_layout.addWidget(add_btn)
+        btn_layout.addWidget(del_btn)
+
+        if has_position:
+            up_btn = QPushButton("Move Up")
+            down_btn = QPushButton("Move Down")
+            renumber_btn = QPushButton("Renumber")
+            up_btn.clicked.connect(
+                lambda: self._swap_junction_position(junction_table, fk, other_fk, primary_value, table, -1)
+            )
+            down_btn.clicked.connect(
+                lambda: self._swap_junction_position(junction_table, fk, other_fk, primary_value, table, 1)
+            )
+            renumber_btn.clicked.connect(
+                lambda: self._renumber_junction_positions(junction_table, fk, other_fk, primary_value, table)
+            )
+            btn_layout.addWidget(up_btn)
+            btn_layout.addWidget(down_btn)
+            btn_layout.addWidget(renumber_btn)
+
+        layout.addLayout(btn_layout)
+        return widget
+
+    def _set_junction_field(
+        self, junction_table: str, fk_col: str, fk_value: Any,
+        other_fk_col: str, other_fk_value: Any,
+        field: str, new_value: Any,
+    ) -> None:
+        self.db.execute(
+            f"UPDATE [{junction_table}] SET [{field}] = ? WHERE [{fk_col}] = ? AND [{other_fk_col}] = ?",
+            (new_value, fk_value, other_fk_value),
+        )
+        self.db.commit()
+
+    def _add_junction_relation(
+        self, junction_table: str, fk: sqlite3.Row, other_fk: sqlite3.Row,
+        primary_value: Any, has_position: bool, table_widget: QTableWidget,
+    ) -> None:
+        target_table = other_fk["table"]
+        target_pk = self.db.primary_key(target_table)
+        if not target_pk:
+            QMessageBox.warning(self, "Cannot add", f"No primary key found for {target_table}")
+            return
+
+        target_cols = [c["name"] for c in self.db.columns(target_table) if c["name"] != target_pk]
+
+        rows = self.db.fetchall(
+            f"SELECT [{target_pk}], [{', '.join(target_cols)}] FROM [{target_table}] ORDER BY [{target_pk}]"
+        )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Add {target_table}")
+        dlg_layout = QVBoxLayout(dialog)
+        dlg_layout.addWidget(QLabel(f"Choose {target_table} to link:"))
+
+        list_widget = QListWidget()
+        item_ids: list[int] = []
+        for row in rows:
+            item_ids.append(int(row[target_pk]))
+            label_parts = [str(row[target_pk])]
+            for col in target_cols:
+                if row[col] is not None:
+                    label_parts.append(str(row[col]))
+            list_widget.addItem(" - ".join(label_parts))
+        dlg_layout.addWidget(list_widget)
+
+        pos_spin = QSpinBox()
+        pos_spin.setRange(1, 99)
+        pos_spin.setValue(table_widget.rowCount() + 1)
+        if has_position:
+            pos_layout = QHBoxLayout()
+            pos_layout.addWidget(QLabel("Position:"))
+            pos_layout.addWidget(pos_spin)
+            dlg_layout.addLayout(pos_layout)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dlg_layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        current_index = list_widget.currentRow()
+        if current_index < 0:
+            return
+
+        other_value = item_ids[current_index]
+        extra_cols = [c["name"] for c in self.db.columns(junction_table) if c["name"] not in {fk["from"], other_fk["from"]}]
+        col_names = [fk["from"], other_fk["from"]] + extra_cols
+        placeholders = ", ".join("?" for _ in col_names)
+        params: list[Any] = [primary_value, other_value]
+
+        if has_position:
+            params.append(pos_spin.value())
+
+        self.db.execute(
+            f"INSERT OR IGNORE INTO [{junction_table}] ({', '.join(f'[{c}]' for c in col_names)}) VALUES ({placeholders})",
+            params,
+        )
+        self.db.commit()
+        self.load_table_data(self.current_table)
+
+    def _delete_junction_relation(
+        self, junction_table: str, fk: sqlite3.Row, other_fk: sqlite3.Row,
+        primary_value: Any, display_columns: list[str], table_widget: QTableWidget,
+    ) -> None:
+        selected_rows = table_widget.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "Remove", "Select a row first.")
+            return
+
+        row_index = selected_rows[0].row()
+        other_fk_col_name = other_fk["from"]
+        if other_fk_col_name in display_columns:
+            col_idx = display_columns.index(other_fk_col_name)
+            item = table_widget.item(row_index, col_idx)
+            if item is None or not item.text():
+                return
+            other_value = int(item.text())
+        else:
+            target_table = other_fk["table"]
+            target_pk = self.db.primary_key(target_table)
+            if target_pk in display_columns:
+                col_idx = display_columns.index(target_pk)
+                item = table_widget.item(row_index, col_idx)
+                if item is None or not item.text():
+                    return
+                other_value = int(item.text())
+            else:
+                QMessageBox.warning(self, "Cannot remove", "Cannot identify the related record.")
+                return
+
+        self.db.execute(
+            f"DELETE FROM [{junction_table}] WHERE [{fk['from']}] = ? AND [{other_fk['from']}] = ?",
+            (primary_value, other_value),
+        )
+        self.db.commit()
+        self.load_table_data(self.current_table)
+
+    def _swap_junction_position(
+        self, junction_table: str, fk: sqlite3.Row, other_fk: sqlite3.Row,
+        primary_value: Any, table_widget: QTableWidget, direction: int,
+    ) -> None:
+        selected_rows = table_widget.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+        row = selected_rows[0].row()
+        target_row = row + direction
+        if target_row < 0 or target_row >= table_widget.rowCount():
+            return
+
+        col_headers: list[str] = []
+        for i in range(table_widget.columnCount()):
+            h = table_widget.horizontalHeaderItem(i)
+            col_headers.append(h.text() if h is not None else "")
+
+        other_fk_name = other_fk["from"]
+        pk_col_idx = col_headers.index(other_fk_name) if other_fk_name in col_headers else -1
+        if pk_col_idx < 0:
+            target_table = other_fk["table"]
+            target_pk = self.db.primary_key(target_table)
+            pk_col_idx = col_headers.index(target_pk) if target_pk in col_headers else -1
+            if pk_col_idx < 0:
+                return
+
+        def _get_other_val(r: int) -> int:
+            item = table_widget.item(r, pk_col_idx)
+            if item is None or not item.text():
+                return 0
+            return int(item.text())
+
+        val_a = _get_other_val(row)
+        val_b = _get_other_val(target_row)
+        if not val_a or not val_b:
+            return
+
+        pos_a_widget = table_widget.cellWidget(row, 0)
+        pos_b_widget = table_widget.cellWidget(target_row, 0)
+        pos_a = pos_a_widget.value() if isinstance(pos_a_widget, QSpinBox) else 0
+        pos_b = pos_b_widget.value() if isinstance(pos_b_widget, QSpinBox) else 0
+
+        self.db.execute(
+            f"UPDATE [{junction_table}] SET [Position] = ? WHERE [{fk['from']}] = ? AND [{other_fk['from']}] = ?",
+            (pos_b, primary_value, val_a),
+        )
+        self.db.execute(
+            f"UPDATE [{junction_table}] SET [Position] = ? WHERE [{fk['from']}] = ? AND [{other_fk['from']}] = ?",
+            (pos_a, primary_value, val_b),
+        )
+        self.db.commit()
+        self.load_table_data(self.current_table)
+
+    def _renumber_junction_positions(
+        self, junction_table: str, fk: sqlite3.Row, other_fk: sqlite3.Row,
+        primary_value: Any, table_widget: QTableWidget,
+    ) -> None:
+        col_headers: list[str] = []
+        for i in range(table_widget.columnCount()):
+            h = table_widget.horizontalHeaderItem(i)
+            col_headers.append(h.text() if h is not None else "")
+
+        other_fk_name = other_fk["from"]
+        pk_col_idx = col_headers.index(other_fk_name) if other_fk_name in col_headers else -1
+        if pk_col_idx < 0:
+            target_pk = self.db.primary_key(other_fk["table"])
+            pk_col_idx = col_headers.index(target_pk) if target_pk in col_headers else -1
+            if pk_col_idx < 0:
+                return
+
+        for row in range(table_widget.rowCount()):
+            item = table_widget.item(row, pk_col_idx)
+            if item is None:
+                continue
+            other_value = int(item.text())
+            self.db.execute(
+                f"UPDATE [{junction_table}] SET [Position] = ? WHERE [{fk['from']}] = ? AND [{other_fk['from']}] = ?",
+                (row + 1, primary_value, other_value),
+            )
+        self.db.commit()
+        self.load_table_data(self.current_table)
 
     def _open_association_editor(
         self,
