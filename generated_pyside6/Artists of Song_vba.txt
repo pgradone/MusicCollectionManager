@@ -1,0 +1,77 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database   'Use database order for string comparisons
+
+Private Sub ArtistCombo_AfterUpdate()
+
+     RelationsMgt.AddFromCombo Forms!Songs![SongID], "Title", Me!ArtistCombo, "SongID", "ArtistID", "Songs", "Sing"
+
+End Sub
+
+Private Sub ArtistCombo_NotInList(NewData As String, Response As Integer)
+
+    Dim ActiveID  As Integer, NewID As Integer, GetText As Variant
+    Dim Prompt As String, Message As String, CRLF As String, ActiveName As String
+    Dim MyQuery As String, MyID As String, MyFirstControl As String
+    Const MB_ICONQUESTION = 32
+    Const YES = 6
+    Const YES_NO = 4
+    CRLF = Chr$(13)
+    Prompt = "Create Artist?"
+    GetText = ArtistCombo.Text
+    'Debug.Print GetText
+
+    Message = GetText & " not found" & CRLF
+    If MsgBox(Message & Prompt, MB_ICONQUESTION & YES_NO, "Create new?") = YES Then
+
+      ' like ButtonAddArtist_Click
+
+      MyQuery = "FreeArtistsID"
+      MyID = "ArtistID"
+      MyFirstControl = "Name"
+
+      DoCmd.OpenQuery MyQuery
+      DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_COPY
+      DoCmd.Close A_QUERY, MyQuery
+      DoCmd.OpenForm "Artists"
+      DoCmd.GoToRecord A_FORM, "Artists", A_NEWREC
+      DoCmd.GoToControl MyID
+      DoCmd.DoMenuItem A_FORMBAR, A_EDITMENU, A_PASTE
+      Forms!Artists!Name = GetText
+      DoCmd.GoToControl MyFirstControl
+    End If
+    Forms!Songs!ArtistCombo = ""
+    Forms!Songs.Refresh
+
+End Sub
+
+Private Sub ArtistID_DblClick(Cancel As Integer)
+
+    Dim GotoCriteria As String, MyForm As String
+    Dim MyKey As String, MyFirstControl As String
+
+    If Screen.ActiveControl <> "" Then
+      MyForm = "Artists"
+      MyKey = "ArtistID"
+      MyFirstControl = "Name"
+
+      GotoCriteria = Screen.ActiveControl
+      DoCmd.OpenForm MyForm
+      DoCmd.GoToControl MyKey
+      DoCmd.FindRecord GotoCriteria
+      DoCmd.GoToControl MyFirstControl
+    End If
+
+End Sub
+
+Private Sub Button13_Click()
+
+End Sub
+
+Private Sub ButtonRemoveSinger_Click()
+
+  RelationsMgt.RemoveFromButton "Sing", Me![ArtistID], Forms!Songs![SongID], "Title"
+
+End Sub

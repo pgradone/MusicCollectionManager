@@ -1,0 +1,40 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database   'Use database order for string comparisons
+
+Private Sub ButtonOpenAllSongs_Click()
+End Sub
+
+Private Sub ButtonRemoveSong_Click()
+
+  RelationsMgt.RemoveFromButton "Contain", Forms!Records![RecordID], Me![SongID], "RecordHouse"
+
+
+End Sub
+
+Private Sub SongCombo_AfterUpdate()
+
+     RelationsMgt.AddFromCombo Forms!Records![RecordID], "RecordHouse", Me!SongCombo, "RecordID", "SongID", "Records", "Contain"
+
+End Sub
+
+Private Sub SongID_DblClick(Cancel As Integer)
+
+    Dim GotoCriteria As String, MyForm As String
+    Dim MyKey As String, MyFirstControl As String
+
+    If Screen.ActiveControl <> "" Then
+      MyForm = "Songs"
+      MyKey = "SongID"
+      MyFirstControl = "Title"
+
+      GotoCriteria = Screen.ActiveControl
+      DoCmd.OpenForm MyForm
+      DoCmd.GoToControl MyKey
+      DoCmd.FindRecord GotoCriteria
+      DoCmd.GoToControl MyFirstControl
+    End If
+
+End Sub

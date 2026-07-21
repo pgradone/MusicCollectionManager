@@ -1,0 +1,129 @@
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = True
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Compare Database   'Use database order for string comparisons
+
+Private Sub Button_OpenQuery_Rec_Click()
+On Error GoTo Err_Button_OpenQuery_Rec_Click
+
+    Dim QueryName As String
+    Dim LinkCriteria As String
+
+    QueryName = "Records_Songs_Artists"
+    DoCmd.OpenQuery QueryName
+
+Exit_Button_OpenQuery_Rec_Click:
+    Exit Sub
+
+Err_Button_OpenQuery_Rec_Click:
+    MsgBox Error$
+    Resume Exit_Button_OpenQuery_Rec_Click
+
+End Sub
+
+Private Sub ButtonOpenArtists_Click()
+On Error GoTo Err_ButtonOpenArtists_Click
+
+    Dim DocName As String
+    Dim LinkCriteria As String
+
+    DocName = "Artists"
+    DoCmd.OpenForm DocName, , , LinkCriteria
+
+Exit_ButtonOpenArtists_Click:
+    Exit Sub
+
+Err_ButtonOpenArtists_Click:
+    MsgBox Error$
+    Resume Exit_ButtonOpenArtists_Click
+
+End Sub
+
+Private Sub ButtonOpenPrograms_Click()
+On Error GoTo Err_ButtonOpenPrograms_Click
+
+    Dim DocName As String
+    Dim LinkCriteria As String
+
+    DocName = "Programs"
+    DoCmd.OpenForm DocName, , , LinkCriteria
+    DoCmd.GoToRecord , "", acLast
+    DoCmd.MoveSize 0, 0
+
+Exit_ButtonOpenPrograms_Click:
+    Exit Sub
+
+Err_ButtonOpenPrograms_Click:
+    MsgBox Error$
+    Resume Exit_ButtonOpenPrograms_Click
+
+End Sub
+
+Private Sub ButtonOpenRecords_Click()
+On Error GoTo Err_ButtonOpenRecords_Click
+
+    Dim DocName As String
+    Dim LinkCriteria As String
+
+    DocName = "Records"
+    DoCmd.OpenForm DocName, , , LinkCriteria
+
+Exit_ButtonOpenRecords_Click:
+    Exit Sub
+
+Err_ButtonOpenRecords_Click:
+    MsgBox Error$
+    Resume Exit_ButtonOpenRecords_Click
+
+End Sub
+
+Private Sub ButtonOpenSongs_Click()
+On Error GoTo Err_ButtonOpenSongs_Click
+
+    Dim DocName As String
+    Dim LinkCriteria As String
+
+    DocName = "Songs"
+    DoCmd.OpenForm DocName, , , LinkCriteria
+
+Exit_ButtonOpenSongs_Click:
+    Exit Sub
+
+Err_ButtonOpenSongs_Click:
+    MsgBox Error$
+    Resume Exit_ButtonOpenSongs_Click
+
+End Sub
+
+Private Sub ButtonOpenStyles_Click()
+On Error GoTo Err_ButtonOpenStyles_Click
+
+    Dim DocName As String
+    Dim LinkCriteria As String
+
+    DocName = "Styles"
+    DoCmd.OpenForm DocName, , , LinkCriteria
+
+Exit_ButtonOpenStyles_Click:
+    Exit Sub
+
+Err_ButtonOpenStyles_Click:
+    MsgBox Error$
+    Resume Exit_ButtonOpenStyles_Click
+
+End Sub
+
+Private Sub ButtonQuitApplicatio_Click()
+On Error GoTo Err_ButtonQuitApplicatio_Click
+
+    DoCmd.Close
+
+Exit_ButtonQuitApplicatio_Click:
+    Exit Sub
+
+Err_ButtonQuitApplicatio_Click:
+    MsgBox Error$
+    Resume Exit_ButtonQuitApplicatio_Click
+
+End Sub

@@ -437,6 +437,35 @@ class DatabaseManager:
 
     # --------------------------------------------------
 
+    def referenced_by(self, table: str) -> list[tuple[str, sqlite3.Row]]:
+
+        references: list[tuple[str, sqlite3.Row]] = []
+
+        for candidate in self.tables():
+
+            for fk in self.foreign_keys(candidate):
+
+                if fk["table"].upper() == table.upper():
+                    references.append((candidate, fk))
+
+        return references
+
+    # --------------------------------------------------
+
+    def is_association_table(self, table: str) -> bool:
+
+        foreign_keys = self.foreign_keys(table)
+
+        if len(foreign_keys) != 2:
+            return False
+
+        primary_keys = [column["name"] for column in self.columns(table) if column["pk"]]
+        key_columns = [fk["from"] for fk in foreign_keys]
+
+        return set(primary_keys) == set(key_columns)
+
+    # --------------------------------------------------
+
     def table_exists(self, table: str) -> bool:
 
         row = self.fetchone(

@@ -1,247 +1,256 @@
 """
-Schema discovery classes.
+=========================================================
+MusicCollectionManager
+Schema Manager
+=========================================================
 
-Reads the SQLite schema once when the application starts.
+Reads and caches the SQLite schema.
+
+This module contains only metadata classes and the basic
+SchemaManager skeleton.
+
+The actual schema loading implementation will be added in
+the next part.
+
+Compatible with
+
+    Python 3.14
+    Pylance Strict
+    mypy
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-
-from typing import Dict, List, Optional
 
 from core.database import DatabaseManager
 
 
-# -------------------------------------------------------
-# Column
-# -------------------------------------------------------
+# =========================================================
+# Column metadata
+# =========================================================
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ColumnInfo:
+    """
+    Describes one SQLite column.
+    """
 
     cid: int
 
     name: str
 
-    datatype: str
+    data_type: str
 
-    notnull: bool
+    not_null: bool
 
-    default: object
+    default_value: str | None
 
     primary_key: bool
 
 
-# -------------------------------------------------------
-# Foreign Key
-# -------------------------------------------------------
+# =========================================================
+# Foreign key metadata
+# =========================================================
 
-@dataclass
+@dataclass(slots=True, frozen=True)
 class ForeignKeyInfo:
+    """
+    Describes one SQLite foreign key.
+    """
 
-    table: str
+    id: int
 
-    from_column: str
+    sequence: int
 
-    to_column: str
+    column: str
+
+    referenced_table: str
+
+    referenced_column: str
+
+    on_update: str
+
+    on_delete: str
+
+    match: str
 
 
-# -------------------------------------------------------
-# Table
-# -------------------------------------------------------
+# =========================================================
+# Index metadata
+# =========================================================
 
-@dataclass
-class TableInfo:
+@dataclass(slots=True, frozen=True)
+class IndexInfo:
+    """
+    Describes one SQLite index.
+    """
+
+    sequence: int
 
     name: str
 
-    columns: List[ColumnInfo] = field(default_factory=lambda: [])
+    unique: bool
 
-    foreign_keys: List[ForeignKeyInfo] = field(default_factory=lambda: [])
+    origin: str
 
-    primary_key: Optional[str] = None
+    partial: bool
+
+
+# =========================================================
+# Table metadata
+# =========================================================
+
+@dataclass(slots=True)
+class TableInfo:
+    """
+    Complete metadata describing one database table.
+    """
+
+    name: str
+
+    columns: list[ColumnInfo] = field(default_factory=lambda: [])
+
+    foreign_keys: list[ForeignKeyInfo] = field(default_factory=lambda: [])
+
+    indexes: list[IndexInfo] = field(default_factory=lambda: [])
 
     row_count: int = 0
 
+    parent_tables: set[str] = field(default_factory=lambda: set())
 
-# -------------------------------------------------------
-# Schema Manager
-# -------------------------------------------------------
+    child_tables: set[str] = field(default_factory=lambda: set())
 
-class SchemaManager:
+    # -----------------------------------------------------
 
-    """
-    Discovers the complete SQLite schema.
-
-    This class should be instantiated once when the
-    application starts.
-    """
-
-    def __init__(self, db: DatabaseManager):
-
-        self.db = db
-
-        self.tables: Dict[str, TableInfo] = {}
-
-    # ----------------------------------------------
-
-    def load(self) -> None:
-
+    @property
+    def primary_key(self) -> ColumnInfo | None:
         """
-        Read every table.
+        Return the primary key column.
         """
 
-        self.tables.clear()
+        for column in self.columns:
 
-        for table_name in self.db.tables():
+            if column.primary_key:
 
-            table = TableInfo(table_name)
-
-            # -----------------------
-            # Columns
-            # -----------------------
-
-            for column in self.db.columns(table_name):
-
-                info = ColumnInfo(
-
-                    cid=column["cid"],
-
-                    name=column["name"],
-
-                    datatype=column["type"],
-
-                    notnull=bool(column["notnull"]),
-
-                    default=column["dflt_value"],
-
-                    primary_key=bool(column["pk"])
-
-                )
-
-                table.columns.append(info)
-
-                if info.primary_key:
-
-                    table.primary_key = info.name
-
-            # -----------------------
-            # Foreign Keys
-            # -----------------------
-
-            for fk in self.db.foreign_keys(table_name):
-
-                table.foreign_keys.append(
-
-                    ForeignKeyInfo(
-
-                        table=fk["table"],
-
-                        from_column=fk["from"],
-
-                        to_column=fk["to"]
-
-                    )
-
-                )
-
-            table.row_count = self.db.count(table_name)
-
-            self.tables[table_name] = table
-
-    # ----------------------------------------------
-
-    def get_table(self, name: str) -> TableInfo:
-
-        return self.tables[name]
-
-    # ----------------------------------------------
-
-    def get_tables(self) -> List[TableInfo]:
-
-        return list(self.tables.values())
-
-    # ----------------------------------------------
-
-    def column(self, table: str, column: str) -> Optional[ColumnInfo]:
-
-        for c in self.tables[table].columns:
-
-            if c.name == column:
-
-                return c
+                return column
 
         return None
 
-    # ----------------------------------------------
+    # -----------------------------------------------------
 
-    def primary_key(self, table: str) -> Optional[str]:
-
-        return self.tables[table].primary_key
-
-    # ----------------------------------------------
-
-    def relationships(self, table: str) -> List[ForeignKeyInfo]:
-
-        return self.tables[table].foreign_keys
-
-    # ----------------------------------------------
-
-    def dump(self) -> None:
-
+    def column(
+        self,
+        name: str,
+    ) -> ColumnInfo | None:
         """
-        Print schema to console.
+        Return one column by name.
         """
 
-        for table in self.tables.values():
+        upper = name.upper()
 
-            print()
+        for column in self.columns:
 
-            print(table.name)
+            if column.name.upper() == upper:
 
-            print("-" * len(table.name))
+                return column
 
-            print()
+        return None
 
-            for column in table.columns:
+    # -----------------------------------------------------
 
-                pk = " PK" if column.primary_key else ""
+    def has_column(
+        self,
+        name: str,
+    ) -> bool:
 
-                print(
+        return self.column(name) is not None
 
-                    f"{column.name:<20}"
 
-                    f"{column.datatype:<12}"
+# =========================================================
+# Schema manager
+# =========================================================
 
-                    f"{pk}"
+class SchemaManager:
+    """
+    Loads and caches the SQLite schema.
+    """
 
-                )
+    def __init__(
+        self,
+        database: DatabaseManager,
+    ) -> None:
 
-            if table.foreign_keys:
+        self.db = database
 
-                print()
+        self._tables: dict[str, TableInfo] = {}
 
-                print("Foreign Keys")
+        self.loaded = False
 
-                print()
+    # -----------------------------------------------------
 
-                for fk in table.foreign_keys:
+    def clear(self) -> None:
 
-                    print(
+        self._tables.clear()
 
-                        f"{fk.from_column}"
+        self.loaded = False
 
-                        f" -> "
+    # -----------------------------------------------------
 
-                        f"{fk.table}.{fk.to_column}"
+    @property
+    def tables(self) -> dict[str, TableInfo]:
 
-                    )
+        return self._tables
 
-            print()
+    # -----------------------------------------------------
 
-            print(
+    def get_table(
+        self,
+        table_name: str,
+    ) -> TableInfo:
 
-                f"Rows : {table.row_count}"
+        key = table_name.upper()
 
+        if key not in self._tables:
+
+            raise KeyError(
+                f"Unknown table '{table_name}'."
             )
+
+        return self._tables[key]
+
+    # -----------------------------------------------------
+
+    def table_names(self) -> list[str]:
+
+        return sorted(self._tables.keys())
+
+    # -----------------------------------------------------
+
+    def __contains__(
+        self,
+        table_name: str,
+    ) -> bool:
+
+        return table_name.upper() in self._tables
+
+    # -----------------------------------------------------
+
+    def __len__(self) -> int:
+
+        return len(self._tables)
+
+    # -----------------------------------------------------
+
+    def __iter__(self) -> Iterator[TableInfo]:
+
+        return iter(self._tables.values())
+
+    # -----------------------------------------------------
+
+    def load(self) -> None:
+        """
+        Implemented in Response 2.
+        """
+        raise NotImplementedError
