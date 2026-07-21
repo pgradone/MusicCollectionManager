@@ -448,7 +448,10 @@ class MainWindow(QMainWindow):
 
         row_index = selected_rows[0].row()
         columns = [column['name'] for column in self.db.columns(association_table)]
-        selected_row = {columns[idx]: table_widget.item(row_index, idx).text() for idx in range(table_widget.columnCount())}
+        selected_row: dict[str, str] = {}
+        for idx in range(table_widget.columnCount()):
+            item = table_widget.item(row_index, idx)
+            selected_row[columns[idx]] = "" if item is None else item.text()
 
         target_column = [candidate for candidate in self.db.foreign_keys(association_table) if candidate['from'] != fk['from']][0]
         self.db.execute(
