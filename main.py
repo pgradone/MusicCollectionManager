@@ -5,7 +5,7 @@ import sqlite3
 import sys
 from typing import Any, TypedDict
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -355,7 +355,7 @@ class MainWindow(QMainWindow):
         table.setHorizontalHeaderLabels(columns)
 
         query = (
-            f"SELECT {', '.join(f'[{name}]' for name in columns)} "
+            f"SELECT {', '.join(f'[{target_table}].[{name}]' for name in columns)} "
             f"FROM [{target_table}] "
             f"INNER JOIN [{relation_table}] ON [{target_table}].[{target_pk}] = [{relation_table}].[{other_fk['from']}] "
             f"WHERE [{relation_table}].[{fk['from']}] = ?"
@@ -478,7 +478,12 @@ class MainWindow(QMainWindow):
                 if value is None:
                     field.clear()
                 else:
-                    field.setDate(value)
+                    if isinstance(value, str):
+                        parsed = QDate.fromString(value, "yyyy-MM-dd")
+                        if parsed.isValid():
+                            field.setDate(parsed)
+                    else:
+                        field.setDate(value)
             elif isinstance(field, (QSpinBox, QDoubleSpinBox)):
                 if value in (None, ""):
                     field.setValue(0)
