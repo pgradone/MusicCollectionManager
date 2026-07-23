@@ -200,6 +200,7 @@ class MainWindow(QMainWindow):
             self.load_table_data(self.current_table)
         elif self.table_combo.count() > 0:
             self.table_combo.setCurrentIndex(0)
+            self.load_table_data()
         else:
             self._clear_related_tabs()
 
