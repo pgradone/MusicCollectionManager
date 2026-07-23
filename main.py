@@ -283,14 +283,13 @@ class MainWindow(QMainWindow):
             self.form_layout.addRow(self._field_label(column_name), field)
 
     def _field_label(self, column_name: str) -> str:
-        normalized = column_name.lower()
-        if "title" in normalized:
-            return "Title"
-        if "name" in normalized:
-            return "Name"
-        if "date" in normalized:
-            return "Date"
-        return column_name
+        label = ""
+        for i, ch in enumerate(column_name):
+            if i > 0 and ch.isupper() and column_name[i - 1].islower():
+                label += " " + ch
+            else:
+                label += ch
+        return label
 
     def _clear_related_tabs(self) -> None:
         while self.related_tabs.count() > 0:
