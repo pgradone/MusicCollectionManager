@@ -310,6 +310,7 @@ class MainWindow(QMainWindow):
         return relationships.get(self.current_table, [])
 
     def _update_related_tabs(self) -> None:
+        previous_index = self.related_tabs.currentIndex()
         self._clear_related_tabs()
 
         if not self.current_row or not self.current_table:
@@ -345,6 +346,9 @@ class MainWindow(QMainWindow):
                 self.current_row[primary_key],
             )
             self.related_tabs.addTab(child_widget, title)
+
+        if 0 <= previous_index < self.related_tabs.count():
+            self.related_tabs.setCurrentIndex(previous_index)
 
     def _find_master_foreign_key(self, relation_table: str) -> sqlite3.Row | None:
         for fk in self.db.foreign_keys(relation_table):
