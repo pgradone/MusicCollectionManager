@@ -241,9 +241,13 @@ class MainWindow(QMainWindow):
             for column_index, column_name in enumerate(self.column_names):
                 value = row.get(column_name)
                 text = "" if value is None else str(value)
-                self.table_widget.setItem(row_index, column_index, QTableWidgetItem(text))
+                item = QTableWidgetItem(text)
+                if column_index == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, row_index)
+                self.table_widget.setItem(row_index, column_index, item)
 
         self.table_widget.resizeColumnsToContents()
+        self.table_widget.setSortingEnabled(True)
         self.table_widget.clearSelection()
 
         if self.table_rows:
@@ -386,6 +390,7 @@ class MainWindow(QMainWindow):
                 table.setItem(row_index, column_index, QTableWidgetItem(text))
 
         table.resizeColumnsToContents()
+        table.setSortingEnabled(True)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
@@ -476,6 +481,7 @@ class MainWindow(QMainWindow):
                     table.setItem(row_idx, col_idx, item)
 
         table.resizeColumnsToContents()
+        table.setSortingEnabled(True)
         layout.addWidget(table)
 
         btn_layout = QHBoxLayout()
@@ -552,6 +558,7 @@ class MainWindow(QMainWindow):
                 table.setItem(row_idx, col_idx, item)
 
         table.resizeColumnsToContents()
+        table.setSortingEnabled(True)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
@@ -669,6 +676,7 @@ class MainWindow(QMainWindow):
                 table.setItem(row_idx, col_idx, item)
 
         table.resizeColumnsToContents()
+        table.setSortingEnabled(True)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
@@ -964,11 +972,15 @@ class MainWindow(QMainWindow):
         if not selected_rows:
             return
 
-        row_index = selected_rows[0].row()
-        if row_index >= len(self.table_rows):
+        visual_row = selected_rows[0].row()
+        first_item = self.table_widget.item(visual_row, 0)
+        if first_item is None:
+            return
+        data_index = first_item.data(Qt.ItemDataRole.UserRole)
+        if data_index is None or data_index >= len(self.table_rows):
             return
 
-        self.current_row = self.table_rows[row_index]
+        self.current_row = self.table_rows[data_index]
         self._populate_form_from_row(self.current_row)
         self._update_related_tabs()
 
