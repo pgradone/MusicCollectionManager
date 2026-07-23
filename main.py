@@ -300,6 +300,8 @@ class MainWindow(QMainWindow):
             "Artists": [("Songs", "Sing")],
             "Songs": [("Artists", "Sing"), ("Records", "Contain"), ("Styles", "Belong")],
             "Records": [("Songs", "Contain")],
+            "Styles": [("Songs", "Belong")],
+            "Programs": [("Schedule", "Schedule")],
         }
         return relationships.get(self.current_table, [])
 
@@ -314,6 +316,13 @@ class MainWindow(QMainWindow):
             return
 
         for title, relation_table in self._related_relationships():
+            if relation_table == "Schedule":
+                child_widget = self._build_schedule_subform(
+                    self.current_row[primary_key],
+                )
+                self.related_tabs.addTab(child_widget, title)
+                continue
+
             fk = self._find_master_foreign_key(relation_table)
             if fk is None:
                 continue
@@ -494,6 +503,142 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_layout)
         return widget
+
+    def _build_schedule_subform(self, program_id: Any) -> QWidget:
+        columns = ["Position", "SongID", "Song_Artist", "Record", "BPM", "Year"]
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.addWidget(QLabel("Songs scheduled in this Program"))
+
+        table = QTableWidget()
+        table.setColumnCount(len(columns))
+        table.setHorizontalHeaderLabels(columns)
+
+        rows = self.db.fetchall(
+            "SELECT s.*, sg.Title FROM [Schedule] s "
+            "LEFT JOIN [Songs] sg ON s.[SongID] = sg.[SongID] "
+            "WHERE s.[ProgramID] = ? ORDER BY CAST(s.[Position] AS INTEGER), s.[Position]",
+            (program_id,),
+        )
+
+        table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            pos = row["Position"]
+            if pos is not None:
+                spin = QSpinBox()
+                spin.setRange(1, 999)
+                spin.setValue(int(pos))
+                spin.valueChanged.connect(
+                    lambda v, pid=program_id: self._set_schedule_position(pid, int(row["SongID"]), v)
+                )
+                table.setCellWidget(row_idx, 0, spin)
+            else:
+                table.setItem(row_idx, 0, QTableWidgetItem(""))
+
+            for col_idx, col_name in enumerate(columns):
+                if col_idx == 0:
+                    continue
+                value = row[col_name]
+                item = QTableWidgetItem("" if value is None else str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_idx, col_idx, item)
+
+        table.resizeColumnsToContents()
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(table)
+
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("Add Song")
+        del_btn = QPushButton("Remove")
+
+        add_btn.clicked.connect(lambda: self._add_schedule_song(program_id, table))
+        del_btn.clicked.connect(lambda: self._delete_schedule_entry(program_id, table))
+        btn_layout.addWidget(add_btn)
+        btn_layout.addWidget(del_btn)
+        layout.addLayout(btn_layout)
+
+        return widget
+
+    def _add_schedule_song(self, program_id: Any, table_widget: QTableWidget) -> None:
+        max_pos = self.db.fetchone(
+            "SELECT COALESCE(MAX([Position]), 0) AS max_pos FROM [Schedule] WHERE [ProgramID] = ?",
+            (program_id,),
+        )
+        next_pos = (int(max_pos["max_pos"]) + 1) if max_pos else 1
+
+        rows = self.db.fetchall(
+            "SELECT [SongID], [Title], [BPM], [Year] FROM [Songs] ORDER BY [SongID]"
+        )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Song to Schedule")
+        dlg_layout = QVBoxLayout(dialog)
+        dlg_layout.addWidget(QLabel("Choose a song:"))
+
+        list_widget = QListWidget()
+        item_ids: list[int] = []
+        for row in rows:
+            item_ids.append(int(row["SongID"]))
+            list_widget.addItem(f"{row['SongID']} - {row['Title']} ({row['Year'] or ''})")
+        dlg_layout.addWidget(list_widget)
+
+        pos_spin = QSpinBox()
+        pos_spin.setRange(1, 999)
+        pos_spin.setValue(next_pos)
+        pos_layout = QHBoxLayout()
+        pos_layout.addWidget(QLabel("Position:"))
+        pos_layout.addWidget(pos_spin)
+        dlg_layout.addLayout(pos_layout)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dlg_layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        current_index = list_widget.currentRow()
+        if current_index < 0:
+            return
+
+        song_id = item_ids[current_index]
+
+        self.db.execute(
+            "INSERT INTO [Schedule] ([ProgramID], [SongID], [Position]) VALUES (?, ?, ?)",
+            (program_id, song_id, pos_spin.value()),
+        )
+        self.db.commit()
+        self.load_table_data(self.current_table)
+
+    def _delete_schedule_entry(self, program_id: Any, table_widget: QTableWidget) -> None:
+        selected_rows = table_widget.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "Remove", "Select a row first.")
+            return
+
+        row_index = selected_rows[0].row()
+        pos_widget = table_widget.cellWidget(row_index, 0)
+        if not isinstance(pos_widget, QSpinBox):
+            return
+        position = pos_widget.value()
+
+        self.db.execute(
+            "DELETE FROM [Schedule] WHERE [ProgramID] = ? AND [Position] = ?",
+            (program_id, position),
+        )
+        self.db.commit()
+        self.load_table_data(self.current_table)
+
+    def _set_schedule_position(self, program_id: Any, song_id: Any, new_pos: int) -> None:
+        self.db.execute(
+            "UPDATE [Schedule] SET [Position] = ? WHERE [ProgramID] = ? AND [SongID] = ?",
+            (new_pos, program_id, song_id),
+        )
+        self.db.commit()
 
     def _set_junction_field(
         self, junction_table: str, fk_col: str, fk_value: Any,
