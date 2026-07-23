@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
-from core.database import ConnectionError, DatabaseManager, QueryError
+from core.database import ConnectionError as DatabaseConnectionError, DatabaseManager, QueryError
 
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ def collect_database_info(db: DatabaseManager) -> DatabaseInfo:
             "tables": tables,
             "message": "Database connection established.",
         }
-    except ConnectionError as exc:
+    except DatabaseConnectionError as exc:
         logger.exception("Could not connect to the database")
         return {
             "connected": False,
@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         self.column_types: dict[str, str] = {}
         self.form_fields: dict[str, QWidget] = {}
         self.table_rows: list[dict[str, Any]] = []
+        self._association_rows: list[sqlite3.Row] = []
 
         self.setWindowTitle(f"{config.APP_NAME} v{config.APP_VERSION}")
         self.resize(config.WINDOW_WIDTH, config.WINDOW_HEIGHT)
@@ -640,8 +641,9 @@ class MainWindow(QMainWindow):
                 spin = QSpinBox()
                 spin.setRange(1, 999)
                 spin.setValue(int(pos))
+                song_id_val = int(row["SongID"])
                 spin.valueChanged.connect(
-                    lambda v, pid=program_id: self._set_schedule_position(pid, int(row["SongID"]), v)
+                    lambda v, pid=program_id, sid=song_id_val: self._set_schedule_position(pid, sid, v)
                 )
                 table.setCellWidget(row_idx, 0, spin)
             else:
@@ -675,7 +677,7 @@ class MainWindow(QMainWindow):
 
         return widget
 
-    def _add_schedule_song(self, program_id: Any, table_widget: QTableWidget) -> None:
+    def _add_schedule_song(self, program_id: Any, _table_widget: QTableWidget) -> None:
         max_pos = self.db.fetchone(
             "SELECT COALESCE(MAX([Position]), 0) AS max_pos FROM [Schedule] WHERE [ProgramID] = ?",
             (program_id,),
@@ -999,7 +1001,7 @@ class MainWindow(QMainWindow):
         association_table: str,
         fk: sqlite3.Row,
         primary_value: Any,
-        table_widget: QTableWidget | None = None,
+        _table_widget: QTableWidget | None = None,
     ) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Link {association_table}")
