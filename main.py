@@ -38,7 +38,7 @@ from core.database import ConnectionError, DatabaseManager, QueryError
 
 logger = logging.getLogger(__name__)
 
-MAIN_TABLES = ["Artists", "Songs", "Records", "Programs"]
+MAIN_TABLES = ["Artists", "Songs", "Records", "Programs", "Styles"]
 
 
 class DatabaseInfo(TypedDict):
