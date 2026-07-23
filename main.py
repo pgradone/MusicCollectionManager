@@ -48,6 +48,16 @@ class DatabaseInfo(TypedDict):
     message: str
 
 
+class TableItem(QTableWidgetItem):
+    def __lt__(self, other):
+        if isinstance(other, QTableWidgetItem):
+            try:
+                return float(self.text()) < float(other.text())
+            except (ValueError, TypeError):
+                pass
+        return super().__lt__(other)
+
+
 def collect_database_info(db: DatabaseManager) -> DatabaseInfo:
     """Connect to the database and return a small summary for the UI."""
 
@@ -241,7 +251,7 @@ class MainWindow(QMainWindow):
             for column_index, column_name in enumerate(self.column_names):
                 value = row.get(column_name)
                 text = "" if value is None else str(value)
-                item = QTableWidgetItem(text)
+                item = TableItem(text)
                 if column_index == 0:
                     item.setData(Qt.ItemDataRole.UserRole, row_index)
                 self.table_widget.setItem(row_index, column_index, item)
@@ -419,7 +429,7 @@ class MainWindow(QMainWindow):
             for column_index, column_name in enumerate(columns):
                 value = row[column_name]
                 text = "" if value is None else str(value)
-                table.setItem(row_index, column_index, QTableWidgetItem(text))
+                table.setItem(row_index, column_index, TableItem(text))
 
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
@@ -506,11 +516,11 @@ class MainWindow(QMainWindow):
                         )
                         table.setCellWidget(row_idx, col_idx, spin)
                     else:
-                        item = QTableWidgetItem(str(value))
+                        item = TableItem(str(value))
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                         table.setItem(row_idx, col_idx, item)
                 else:
-                    item = QTableWidgetItem("" if value is None else str(value))
+                    item = TableItem("" if value is None else str(value))
                     if col_name not in junction_extra_cols:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     table.setItem(row_idx, col_idx, item)
@@ -585,13 +595,13 @@ class MainWindow(QMainWindow):
                 )
                 table.setCellWidget(row_idx, 0, spin)
             else:
-                table.setItem(row_idx, 0, QTableWidgetItem(""))
+                table.setItem(row_idx, 0, TableItem(""))
 
             for col_idx, col_name in enumerate(columns):
                 if col_idx == 0:
                     continue
                 value = row[col_name]
-                item = QTableWidgetItem("" if value is None else str(value))
+                item = TableItem("" if value is None else str(value))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row_idx, col_idx, item)
 
@@ -712,7 +722,7 @@ class MainWindow(QMainWindow):
                 value = row[col_name]
                 if col_name == "Position" and value is not None:
                     value = int(value)
-                item = QTableWidgetItem("" if value is None else str(value))
+                item = TableItem("" if value is None else str(value))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row_idx, col_idx, item)
 
