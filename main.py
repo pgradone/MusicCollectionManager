@@ -299,6 +299,34 @@ class MainWindow(QMainWindow):
         while self.related_tabs.count() > 0:
             self.related_tabs.removeTab(0)
 
+    @staticmethod
+    def _find_column_index(table: QTableWidget, column_name: str) -> int:
+        for col in range(table.columnCount()):
+            header = table.horizontalHeaderItem(col)
+            if header is not None and header.text() == column_name:
+                return col
+        return -1
+
+    def _navigate_to_record(self, target_table: str, target_pk: str, table: QTableWidget, row: int) -> None:
+        pk_col = self._find_column_index(table, target_pk)
+        if pk_col < 0:
+            return
+        item = table.item(row, pk_col)
+        if item is None or not item.text():
+            return
+        pk_value = item.text()
+
+        idx = self.table_combo.findText(target_table)
+        if idx < 0:
+            return
+        self.table_combo.setCurrentIndex(idx)
+
+        for i, r in enumerate(self.table_rows):
+            if str(r.get(target_pk)) == pk_value:
+                self.table_widget.selectRow(i)
+                self.table_widget.setFocus()
+                return
+
     def _related_relationships(self) -> list[tuple[str, str]]:
         relationships: dict[str, list[tuple[str, str]]] = {
             "Artists": [("Songs", "Sing")],
@@ -395,6 +423,9 @@ class MainWindow(QMainWindow):
 
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
+        table.cellDoubleClicked.connect(
+            lambda r, c, t=target_table, p=target_pk, tw=table: self._navigate_to_record(t, p, tw, r)
+        )
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
@@ -486,6 +517,9 @@ class MainWindow(QMainWindow):
 
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
+        table.cellDoubleClicked.connect(
+            lambda r, c, t=target_table, p=target_pk, tw=table: self._navigate_to_record(t, p, tw, r)
+        )
         layout.addWidget(table)
 
         btn_layout = QHBoxLayout()
@@ -563,6 +597,9 @@ class MainWindow(QMainWindow):
 
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
+        table.cellDoubleClicked.connect(
+            lambda r, c, tw=table: self._navigate_to_record("Songs", "SongID", tw, r)
+        )
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
@@ -681,6 +718,9 @@ class MainWindow(QMainWindow):
 
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
+        table.cellDoubleClicked.connect(
+            lambda r, c, tw=table: self._navigate_to_record("Programs", "ProgramID", tw, r)
+        )
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
