@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
     def _related_relationships(self) -> list[tuple[str, str]]:
         relationships: dict[str, list[tuple[str, str]]] = {
             "Artists": [("Songs", "Sing")],
-            "Songs": [("Artists", "Sing"), ("Records", "Contain"), ("Styles", "Belong")],
+            "Songs": [("Artists", "Sing"), ("Records", "Contain"), ("Styles", "Belong"), ("Programs scheduling this Song", "ScheduledPrograms")],
             "Records": [("Songs", "Contain")],
             "Styles": [("Songs", "Belong")],
             "Programs": [("Schedule", "Schedule")],
@@ -318,6 +318,13 @@ class MainWindow(QMainWindow):
         for title, relation_table in self._related_relationships():
             if relation_table == "Schedule":
                 child_widget = self._build_schedule_subform(
+                    self.current_row[primary_key],
+                )
+                self.related_tabs.addTab(child_widget, title)
+                continue
+
+            if relation_table == "ScheduledPrograms":
+                child_widget = self._build_scheduled_programs_subform(
                     self.current_row[primary_key],
                 )
                 self.related_tabs.addTab(child_widget, title)
@@ -632,6 +639,40 @@ class MainWindow(QMainWindow):
         )
         self.db.commit()
         self.load_table_data(self.current_table)
+
+    def _build_scheduled_programs_subform(self, song_id: Any) -> QWidget:
+        columns = ["Position", "ProgramID", "ProgName", "DateSched", "DateCreate", "Description"]
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.addWidget(QLabel("Programs that schedule this Song"))
+
+        table = QTableWidget()
+        table.setColumnCount(len(columns))
+        table.setHorizontalHeaderLabels(columns)
+
+        rows = self.db.fetchall(
+            "SELECT s.[Position], s.[SongID], p.* FROM [Schedule] s "
+            "INNER JOIN [Programs] p ON s.[ProgramID] = p.[ProgramID] "
+            "WHERE s.[SongID] = ? ORDER BY p.[DateSched], p.[ProgName]",
+            (song_id,),
+        )
+
+        table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            for col_idx, col_name in enumerate(columns):
+                value = row[col_name]
+                if col_name == "Position" and value is not None:
+                    value = int(value)
+                item = QTableWidgetItem("" if value is None else str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_idx, col_idx, item)
+
+        table.resizeColumnsToContents()
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(table)
+
+        return widget
 
     def _set_schedule_position(self, program_id: Any, song_id: Any, new_pos: int) -> None:
         self.db.execute(
