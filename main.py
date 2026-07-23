@@ -153,6 +153,7 @@ class MainWindow(QMainWindow):
 
         self.related_tabs = QTabWidget()
         self.related_tabs.setMinimumWidth(400)
+        self._subform_sort_state: dict[str, tuple[int, Qt.SortOrder]] = {}
 
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(QLabel("Table"))
@@ -234,6 +235,16 @@ class MainWindow(QMainWindow):
         if not table_name:
             return
 
+        previous_pk = None
+        previous_pk_col = None
+        if self.current_row is not None and self.current_table:
+            pk = self.db.primary_key(self.current_table)
+            if pk and pk in self.current_row:
+                previous_pk = str(self.current_row[pk])
+                previous_pk_col = pk
+        prev_sort_col = self.table_widget.horizontalHeader().sortIndicatorSection()
+        prev_sort_order = self.table_widget.horizontalHeader().sortIndicatorOrder()
+
         self.current_table = table_name
         self.column_names = [column["name"] for column in self.db.columns(table_name)]
         self.column_types = {column["name"]: str(column["type"]) for column in self.db.columns(table_name)}
@@ -258,12 +269,26 @@ class MainWindow(QMainWindow):
 
         self.table_widget.resizeColumnsToContents()
         self.table_widget.setSortingEnabled(True)
+
+        if 0 <= prev_sort_col < self.table_widget.columnCount():
+            self.table_widget.sortItems(prev_sort_col, prev_sort_order)
+
         self.table_widget.clearSelection()
 
         if self.table_rows:
             self.current_row = self.table_rows[0]
             self._populate_form_from_row(self.current_row)
-            self.table_widget.selectRow(0)
+            if previous_pk is not None and previous_pk_col in self.column_names:
+                pk_col_idx = self.column_names.index(previous_pk_col)
+                for row in range(self.table_widget.rowCount()):
+                    item = self.table_widget.item(row, pk_col_idx)
+                    if item is not None and item.text() == previous_pk:
+                        self.table_widget.selectRow(row)
+                        break
+                else:
+                    self.table_widget.selectRow(0)
+            else:
+                self.table_widget.selectRow(0)
         else:
             self.current_row = None
             self.clear_form()
@@ -348,6 +373,17 @@ class MainWindow(QMainWindow):
         return relationships.get(self.current_table, [])
 
     def _update_related_tabs(self) -> None:
+        for i in range(self.related_tabs.count()):
+            title = self.related_tabs.tabText(i)
+            widget = self.related_tabs.widget(i)
+            table = widget.findChild(QTableWidget)
+            if table is not None:
+                col = table.horizontalHeader().sortIndicatorSection()
+                order = table.horizontalHeader().sortIndicatorOrder()
+                if col >= 0:
+                    key = f"{self.current_table}:{title}"
+                    self._subform_sort_state[key] = (col, order)
+
         previous_index = self.related_tabs.currentIndex()
         self._clear_related_tabs()
 
@@ -384,6 +420,20 @@ class MainWindow(QMainWindow):
                 self.current_row[primary_key],
             )
             self.related_tabs.addTab(child_widget, title)
+
+        for i in range(self.related_tabs.count()):
+            title = self.related_tabs.tabText(i)
+            key = f"{self.current_table}:{title}"
+            widget = self.related_tabs.widget(i)
+            table = widget.findChild(QTableWidget)
+            if table is not None:
+                if key in self._subform_sort_state:
+                    col, order = self._subform_sort_state[key]
+                    if 0 <= col < table.columnCount():
+                        table.sortItems(col, order)
+                table.horizontalHeader().sortIndicatorChanged.connect(
+                    lambda col, order, k=key: self._subform_sort_state.update({k: (col, order)})
+                )
 
         if 0 <= previous_index < self.related_tabs.count():
             self.related_tabs.setCurrentIndex(previous_index)
