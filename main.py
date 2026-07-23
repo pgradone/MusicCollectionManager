@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
-from core.database import ConnectionError as DatabaseConnectionError, DatabaseManager, QueryError
+from core.database import ConnectionError, DatabaseManager, QueryError
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class TableItem(QTableWidgetItem):
                 return float(self.text()) < float(other.text())
             except (ValueError, TypeError):
                 pass
-        return super().__lt__(other)
+        return self.text() < other.text()
 
 
 def collect_database_info(db: DatabaseManager) -> DatabaseInfo:
@@ -70,7 +70,7 @@ def collect_database_info(db: DatabaseManager) -> DatabaseInfo:
             "tables": tables,
             "message": "Database connection established.",
         }
-    except DatabaseConnectionError as exc:
+    except ConnectionError as exc:
         logger.exception("Could not connect to the database")
         return {
             "connected": False,
@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
         self.column_types: dict[str, str] = {}
         self.form_fields: dict[str, QWidget] = {}
         self.table_rows: list[dict[str, Any]] = []
-        self._association_rows: list[sqlite3.Row] = []
+        self._subform_sort_state: dict[str, tuple[int, Qt.SortOrder]] = {}
 
         self.setWindowTitle(f"{config.APP_NAME} v{config.APP_VERSION}")
         self.resize(config.WINDOW_WIDTH, config.WINDOW_HEIGHT)
@@ -154,7 +154,6 @@ class MainWindow(QMainWindow):
 
         self.related_tabs = QTabWidget()
         self.related_tabs.setMinimumWidth(400)
-        self._subform_sort_state: dict[str, tuple[int, Qt.SortOrder]] = {}
 
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(QLabel("Table"))
@@ -243,9 +242,7 @@ class MainWindow(QMainWindow):
             if pk and pk in self.current_row:
                 previous_pk = str(self.current_row[pk])
                 previous_pk_col = pk
-        prev_sort_col = self.table_widget.horizontalHeader().sortIndicatorSection()
-        prev_sort_order = self.table_widget.horizontalHeader().sortIndicatorOrder()
-
+        self._previous_table = self.current_table
         self.current_table = table_name
         self.column_names = [column["name"] for column in self.db.columns(table_name)]
         self.column_types = {column["name"]: str(column["type"]) for column in self.db.columns(table_name)}
@@ -270,10 +267,6 @@ class MainWindow(QMainWindow):
 
         self.table_widget.resizeColumnsToContents()
         self.table_widget.setSortingEnabled(True)
-
-        if 0 <= prev_sort_col < self.table_widget.columnCount():
-            self.table_widget.sortItems(prev_sort_col, prev_sort_order)
-
         self.table_widget.clearSelection()
 
         if self.table_rows:
@@ -343,7 +336,9 @@ class MainWindow(QMainWindow):
                 return col
         return -1
 
-    def _navigate_to_record(self, target_table: str, target_pk: str, table: QTableWidget, row: int) -> None:
+    def _navigate_to_record(self, target_table: str, target_pk: str | None, table: QTableWidget, row: int) -> None:
+        if target_pk is None:
+            return
         pk_col = self._find_column_index(table, target_pk)
         if pk_col < 0:
             return
@@ -357,9 +352,13 @@ class MainWindow(QMainWindow):
             return
         self.table_combo.setCurrentIndex(idx)
 
-        for i, r in enumerate(self.table_rows):
-            if str(r.get(target_pk)) == pk_value:
-                self.table_widget.selectRow(i)
+        pk_col = self._find_column_index(self.table_widget, target_pk)
+        if pk_col < 0:
+            return
+        for visual_row in range(self.table_widget.rowCount()):
+            item = self.table_widget.item(visual_row, pk_col)
+            if item is not None and item.text() == pk_value:
+                self.table_widget.selectRow(visual_row)
                 self.table_widget.setFocus()
                 return
 
@@ -377,12 +376,12 @@ class MainWindow(QMainWindow):
         for i in range(self.related_tabs.count()):
             title = self.related_tabs.tabText(i)
             widget = self.related_tabs.widget(i)
-            table = widget.findChild(QTableWidget)
+            table = widget.findChild(QTableWidget) if widget is not None else None
             if table is not None:
                 col = table.horizontalHeader().sortIndicatorSection()
                 order = table.horizontalHeader().sortIndicatorOrder()
                 if col >= 0:
-                    key = f"{self.current_table}:{title}"
+                    key = f"{self._previous_table}:{title}"
                     self._subform_sort_state[key] = (col, order)
 
         previous_index = self.related_tabs.currentIndex()
@@ -426,7 +425,7 @@ class MainWindow(QMainWindow):
             title = self.related_tabs.tabText(i)
             key = f"{self.current_table}:{title}"
             widget = self.related_tabs.widget(i)
-            table = widget.findChild(QTableWidget)
+            table = widget.findChild(QTableWidget) if widget is not None else None
             if table is not None:
                 if key in self._subform_sort_state:
                     col, order = self._subform_sort_state[key]
@@ -641,9 +640,8 @@ class MainWindow(QMainWindow):
                 spin = QSpinBox()
                 spin.setRange(1, 999)
                 spin.setValue(int(pos))
-                song_id_val = int(row["SongID"])
                 spin.valueChanged.connect(
-                    lambda v, pid=program_id, sid=song_id_val: self._set_schedule_position(pid, sid, v)
+                    lambda v, pid=program_id: self._set_schedule_position(pid, int(row["SongID"]), v)
                 )
                 table.setCellWidget(row_idx, 0, spin)
             else:
@@ -677,7 +675,7 @@ class MainWindow(QMainWindow):
 
         return widget
 
-    def _add_schedule_song(self, program_id: Any, _table_widget: QTableWidget) -> None:
+    def _add_schedule_song(self, program_id: Any, table_widget: QTableWidget) -> None:
         max_pos = self.db.fetchone(
             "SELECT COALESCE(MAX([Position]), 0) AS max_pos FROM [Schedule] WHERE [ProgramID] = ?",
             (program_id,),
@@ -918,12 +916,22 @@ class MainWindow(QMainWindow):
         self, junction_table: str, fk: sqlite3.Row, other_fk: sqlite3.Row,
         primary_value: Any, table_widget: QTableWidget, direction: int,
     ) -> None:
+        prev_sort_col = table_widget.horizontalHeader().sortIndicatorSection()
+        prev_sort_order = table_widget.horizontalHeader().sortIndicatorOrder()
+        table_widget.setSortingEnabled(False)
+
         selected_rows = table_widget.selectionModel().selectedRows()
         if not selected_rows:
+            table_widget.setSortingEnabled(True)
+            if 0 <= prev_sort_col < table_widget.columnCount():
+                table_widget.sortItems(prev_sort_col, prev_sort_order)
             return
         row = selected_rows[0].row()
         target_row = row + direction
         if target_row < 0 or target_row >= table_widget.rowCount():
+            table_widget.setSortingEnabled(True)
+            if 0 <= prev_sort_col < table_widget.columnCount():
+                table_widget.sortItems(prev_sort_col, prev_sort_order)
             return
 
         col_headers: list[str] = []
@@ -938,6 +946,9 @@ class MainWindow(QMainWindow):
             target_pk = self.db.primary_key(target_table)
             pk_col_idx = col_headers.index(target_pk) if target_pk in col_headers else -1
             if pk_col_idx < 0:
+                table_widget.setSortingEnabled(True)
+                if 0 <= prev_sort_col < table_widget.columnCount():
+                    table_widget.sortItems(prev_sort_col, prev_sort_order)
                 return
 
         def _get_other_val(r: int) -> int:
@@ -949,6 +960,9 @@ class MainWindow(QMainWindow):
         val_a = _get_other_val(row)
         val_b = _get_other_val(target_row)
         if not val_a or not val_b:
+            table_widget.setSortingEnabled(True)
+            if 0 <= prev_sort_col < table_widget.columnCount():
+                table_widget.sortItems(prev_sort_col, prev_sort_order)
             return
 
         pos_a_widget = table_widget.cellWidget(row, 0)
@@ -971,6 +985,8 @@ class MainWindow(QMainWindow):
         self, junction_table: str, fk: sqlite3.Row, other_fk: sqlite3.Row,
         primary_value: Any, table_widget: QTableWidget,
     ) -> None:
+        table_widget.setSortingEnabled(False)
+
         col_headers: list[str] = []
         for i in range(table_widget.columnCount()):
             h = table_widget.horizontalHeaderItem(i)
@@ -982,6 +998,7 @@ class MainWindow(QMainWindow):
             target_pk = self.db.primary_key(other_fk["table"])
             pk_col_idx = col_headers.index(target_pk) if target_pk in col_headers else -1
             if pk_col_idx < 0:
+                table_widget.setSortingEnabled(True)
                 return
 
         for row in range(table_widget.rowCount()):
@@ -1001,7 +1018,7 @@ class MainWindow(QMainWindow):
         association_table: str,
         fk: sqlite3.Row,
         primary_value: Any,
-        _table_widget: QTableWidget | None = None,
+        table_widget: QTableWidget | None = None,
     ) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Link {association_table}")
@@ -1086,8 +1103,10 @@ class MainWindow(QMainWindow):
         if data_index is None or data_index >= len(self.table_rows):
             return
 
-        self.current_row = self.table_rows[data_index]
-        self._populate_form_from_row(self.current_row)
+        row = self.table_rows[data_index]
+        self.current_row = row
+        if self.current_row is not None:
+            self._populate_form_from_row(row)
         self._update_related_tabs()
 
     def _populate_form_from_row(self, row: dict[str, Any]) -> None:
