@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
         rows = self.db.fetchall(query)
         self.table_rows = [dict(row) for row in rows]
 
+        self.table_widget.setSortingEnabled(False)
         self.table_widget.setColumnCount(len(self.column_names))
         self.table_widget.setRowCount(len(self.table_rows))
         self.table_widget.setHorizontalHeaderLabels(self.column_names)
