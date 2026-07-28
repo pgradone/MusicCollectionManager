@@ -358,9 +358,13 @@ class MainWindow(QMainWindow):
             return
         self.table_combo.setCurrentIndex(idx)
 
-        for i, r in enumerate(self.table_rows):
-            if str(r.get(target_pk)) == pk_value:
-                self.table_widget.selectRow(i)
+        if target_pk not in self.column_names:
+            return
+        pk_col_idx = self.column_names.index(target_pk)
+        for visual_row in range(self.table_widget.rowCount()):
+            cell = self.table_widget.item(visual_row, pk_col_idx)
+            if cell is not None and cell.text() == pk_value:
+                self.table_widget.selectRow(visual_row)
                 self.table_widget.setFocus()
                 return
 
