@@ -5,7 +5,7 @@ import sqlite3
 import sys
 from typing import Any, TypedDict
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QEvent, QObject, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
         self.column_names: list[str] = []
         self.column_types: dict[str, str] = {}
         self.form_fields: dict[str, QWidget] = {}
+        self._form_fk_links: dict[QWidget, tuple[str, str]] = {}
         self.table_rows: list[dict[str, Any]] = []
         self._subform_sort_state: dict[str, tuple[int, Qt.SortOrder]] = {}
 
@@ -302,6 +303,8 @@ class MainWindow(QMainWindow):
             self.form_layout.removeRow(0)
 
         self.form_fields = {}
+        self._form_fk_links = {}
+        links = MAIN_TABLE_CELL_LINKS.get(self.current_table, {})
         for column_name in self.column_names:
             column_type = self.column_types.get(column_name, "")
             normalized = column_type.lower()
@@ -320,8 +323,59 @@ class MainWindow(QMainWindow):
             else:
                 field = QLineEdit()
 
+            target_table = links.get(column_name)
+            if target_table:
+                self._register_fk_field(field, column_name, target_table)
+
             self.form_fields[column_name] = field
             self.form_layout.addRow(self._field_label(column_name), field)
+
+    def _register_fk_field(self, field: QWidget, column_name: str, target_table: str) -> None:
+        """
+        Wire a form field up so double-clicking it navigates to the
+        linked record, mirroring the main table's cell double-click.
+        """
+        widgets = [field]
+
+        # QSpinBox / QDoubleSpinBox render their text in an internal
+        # QLineEdit, which receives mouse events directly - so the
+        # filter must be installed there too, not just on the field.
+        line_edit_getter = getattr(field, "lineEdit", None)
+        if callable(line_edit_getter):
+            line_edit = line_edit_getter()
+            if line_edit is not None:
+                widgets.append(line_edit)
+
+        for widget in widgets:
+            widget.installEventFilter(self)
+            self._form_fk_links[widget] = (column_name, target_table)
+
+        field.setToolTip(f"Double-click to open the linked {target_table} record")
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick and obj in self._form_fk_links:
+            column_name, target_table = self._form_fk_links[obj]
+            self._on_form_field_double_clicked(column_name, target_table)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _on_form_field_double_clicked(self, column_name: str, target_table: str) -> None:
+        if self.current_row is None:
+            return
+
+        value = self.current_row.get(column_name)
+        if value is None or value == "":
+            return
+
+        try:
+            numeric_value = int(value)
+        except (TypeError, ValueError):
+            numeric_value = None
+
+        if numeric_value == 0:
+            return
+
+        self._navigate_to_related_value(target_table, column_name, str(value))
 
     def _field_label(self, column_name: str) -> str:
         label = ""
@@ -377,8 +431,9 @@ class MainWindow(QMainWindow):
         item = table.item(row, pk_col)
         if item is None or not item.text():
             return
-        pk_value = item.text()
+        self._navigate_to_related_value(target_table, target_pk, item.text())
 
+    def _navigate_to_related_value(self, target_table: str, target_pk: str, pk_value: str) -> None:
         idx = self.table_combo.findText(target_table)
         if idx < 0:
             return
