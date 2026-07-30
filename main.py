@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 
 MAIN_TABLES = ["Artists", "Songs", "Records", "Programs", "Styles"]
 
+# Foreign-key columns in the main table grid that should navigate to another
+# table on double-click, e.g. Records.ArtistID -> the record's Main Artist.
+MAIN_TABLE_CELL_LINKS: dict[str, dict[str, str]] = {
+    "Records": {"ArtistID": "Artists"},
+}
+
 
 class DatabaseInfo(TypedDict):
     connected: bool
@@ -147,6 +153,7 @@ class MainWindow(QMainWindow):
         self.table_widget.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table_widget.itemSelectionChanged.connect(self.on_row_selected)
+        self.table_widget.cellDoubleClicked.connect(self._on_main_table_double_clicked)
 
         self.form_group = QGroupBox("Record details")
         self.form_layout = QFormLayout(self.form_group)
@@ -337,6 +344,30 @@ class MainWindow(QMainWindow):
                 return col
         return -1
 
+    def _on_main_table_double_clicked(self, row: int, column: int) -> None:
+        links = MAIN_TABLE_CELL_LINKS.get(self.current_table)
+        if not links or column >= len(self.column_names):
+            return
+
+        column_name = self.column_names[column]
+        target_table = links.get(column_name)
+        if not target_table:
+            return
+
+        item = self.table_widget.item(row, column)
+        if item is None or not item.text():
+            return
+
+        try:
+            fk_value = int(item.text())
+        except ValueError:
+            return
+
+        if fk_value == 0:
+            return
+
+        self._navigate_to_record(target_table, column_name, self.table_widget, row)
+
     def _navigate_to_record(self, target_table: str, target_pk: str | None, table: QTableWidget, row: int) -> None:
         if target_pk is None:
             return
@@ -353,9 +384,13 @@ class MainWindow(QMainWindow):
             return
         self.table_combo.setCurrentIndex(idx)
 
-        for i, r in enumerate(self.table_rows):
-            if str(r.get(target_pk)) == pk_value:
-                self.table_widget.selectRow(i)
+        if target_pk not in self.column_names:
+            return
+        pk_col_idx = self.column_names.index(target_pk)
+        for visual_row in range(self.table_widget.rowCount()):
+            cell = self.table_widget.item(visual_row, pk_col_idx)
+            if cell is not None and cell.text() == pk_value:
+                self.table_widget.selectRow(visual_row)
                 self.table_widget.setFocus()
                 return
 
