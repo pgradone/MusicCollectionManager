@@ -13,7 +13,7 @@ def main() -> None:
     with DatabaseContext() as context:
         print("\n[1] DatabaseContext")
         print(f"    Started: {context.started}")
-        print(f"    Database: {context.database.database_path()}")
+        print(f"    Database: {context.database.database_path}")
 
         print("\n[2] Schema")
         print(f"    Tables found: {len(context.schema.tables)}")
@@ -31,11 +31,11 @@ def main() -> None:
         print(f"    Table: {repository.table_name}")
         print(f"    Columns: {repository.columns}")
         print(f"    Primary key: {repository.primary_key_columns}")
-        print(f"    Row count: {repository.row_count()}")
+        print(f"    Row count: {repository.row_count}")
 
         print("\n[4] First records")
 
-        records = repository.all(limit=5)
+        records = repository.find(limit=5)
 
         for record in records:
             print(f"    {record}")
