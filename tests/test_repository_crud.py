@@ -1,234 +1,522 @@
+"""
+Milestone 2C - Repository CRUD Integration Test
+
+Uses the dedicated test database:
+
+    tests/Musi_crud_test.db
+
+The original Musi.db is never modified.
+
+The test creates a temporary table, loads it into the schema,
+and exercises the generic Repository CRUD API.
+"""
+
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
-import shutil
+from typing import Any
 
 from core.context import DatabaseContext
-from core.database import DatabaseManager
-from core.repository import Repository
+from core.repository import repository_for
 
 
-SOURCE_DATABASE = Path("Musi.db")
-TEST_DATABASE = Path("tests/Musi_crud_test.db")
+# ============================================================
+# Configuration
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+TEST_DATABASE = PROJECT_ROOT / "tests" / "Musi_crud_test.db"
+
+TEST_TABLE = "_repository_crud_test"
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+
+def create_test_table(database: Path) -> None:
+    """Create the temporary CRUD test table."""
+
+    connection = sqlite3.connect(database)
+
+    try:
+        connection.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS "{TEST_TABLE}" (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                value INTEGER,
+                description TEXT
+            )
+            """
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()
+
+
+def remove_test_table(database: Path) -> None:
+    """Remove the temporary CRUD test table."""
+
+    connection = sqlite3.connect(database)
+
+    try:
+        connection.execute(
+            f'DROP TABLE IF EXISTS "{TEST_TABLE}"'
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()
+
+
+def print_result(label: str, value: Any) -> None:
+    """Print a consistently formatted test result."""
+
+    print(f"    {label}: {value}")
+
+
+# ============================================================
+# Main test
+# ============================================================
 
 
 def main() -> None:
-    print("=" * 60)
-    print("Milestone 2A-B - Safe Repository CRUD Test")
-    print("=" * 60)
+    """Run the Milestone 2C repository CRUD test."""
 
-    # ---------------------------------------------------------
-    # 1. Create a fresh copy of the real database
-    # ---------------------------------------------------------
+    print()
+    print("# Milestone 2C - Repository CRUD")
+    print()
 
-    print("\n[1] Preparing test database")
-
-    if not SOURCE_DATABASE.exists():
+    if not TEST_DATABASE.exists():
         raise FileNotFoundError(
-            f"Source database not found: {SOURCE_DATABASE}"
+            f"Test database not found:\n{TEST_DATABASE}"
         )
 
-    TEST_DATABASE.parent.mkdir(parents=True, exist_ok=True)
+    print("[1] Test database")
+    print_result("Database", TEST_DATABASE)
 
-    shutil.copy2(SOURCE_DATABASE, TEST_DATABASE)
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Create the table BEFORE the schema is loaded.
+    # --------------------------------------------------------
 
-    print(f"    Source: {SOURCE_DATABASE.resolve()}")
-    print(f"    Test:   {TEST_DATABASE.resolve()}")
+    create_test_table(TEST_DATABASE)
 
-    # ---------------------------------------------------------
-    # 2. Configure the DatabaseManager for the test copy
-    # ---------------------------------------------------------
+    context: DatabaseContext | None = None
 
-    print("\n[2] Opening test database")
+    try:
+        print()
+        print("[2] DatabaseContext")
 
-    database = DatabaseManager()
+        context = DatabaseContext()
 
-    # Make absolutely sure there is no active connection.
-    database.disconnect()
+        # DatabaseManager is a singleton.
+        # Explicitly select the dedicated CRUD database BEFORE
+        # connecting and loading the schema.
+        context.database.database = TEST_DATABASE
 
-    # Point the singleton at the copied database.
-    database.database = TEST_DATABASE.resolve()
+        context.start(load_schema=True)
 
-    print(f"    Database: {database.database_path}")
+        print_result("Started", context.started)
+        print_result(
+            "Database",
+            context.database.database_path,
+        )
 
-    # ---------------------------------------------------------
-    # 3. Start the application context
-    # ---------------------------------------------------------
+        # ----------------------------------------------------
+        # Verify the temporary table
+        # ----------------------------------------------------
 
-    with DatabaseContext(database) as context:
+        print()
+        print("[3] Temporary CRUD table")
 
-        print("\n[3] DatabaseContext")
+        table = context.schema.get_table(TEST_TABLE)
 
-        print(f"    Started: {context.started}")
-        print(f"    Database: {context.database.database_path}")
+        print_result("Table", table.name)
 
-        # -----------------------------------------------------
-        # 4. Create repository for Artists
-        # -----------------------------------------------------
+        # Do not assume TableInfo has a "column_names" property.
+        # The Repository exposes the normalized column names.
+        #
+        # We verify the same information through Repository below.
 
-        repository = Repository(
+        # ----------------------------------------------------
+        # Repository
+        # ----------------------------------------------------
+
+        print()
+        print("[4] Repository")
+
+        repository = repository_for(
             context,
-            "Artists",
+            TEST_TABLE,
         )
 
-        print("\n[4] Artists repository")
+        print_result(
+            "Table",
+            repository.table_name,
+        )
 
-        print(f"    Table: {repository.table_name}")
-        print(f"    Columns: {repository.columns}")
-        print(f"    Primary key: {repository.primary_key_columns}")
-        print(f"    Initial row count: {repository.row_count}")
+        print_result(
+            "Columns",
+            repository.columns,
+        )
 
-        initial_count = repository.row_count
+        print_result(
+            "Primary key",
+            repository.primary_key_columns,
+        )
 
-        # -----------------------------------------------------
-        # 5. INSERT
-        # -----------------------------------------------------
+        # ----------------------------------------------------
+        # Verify expected metadata
+        # ----------------------------------------------------
 
-        print("\n[5] INSERT")
+        expected_columns = [
+            "id",
+            "name",
+            "value",
+            "description",
+        ]
 
-        inserted_id = repository.insert(
+        if repository.columns != expected_columns:
+            raise AssertionError(
+                "Unexpected repository columns.\n"
+                f"Expected: {expected_columns}\n"
+                f"Actual:   {repository.columns}"
+            )
+
+        if repository.primary_key_columns != ["id"]:
+            raise AssertionError(
+                "Unexpected primary key.\n"
+                f"Expected: ['id']\n"
+                f"Actual:   {repository.primary_key_columns}"
+            )
+
+        # ----------------------------------------------------
+        # Initial state
+        # ----------------------------------------------------
+
+        print()
+        print("[5] Initial state")
+
+        initial_count = repository.count()
+
+        print_result("Row count", initial_count)
+
+        if initial_count != 0:
+            raise AssertionError(
+                f"Expected empty test table, got {initial_count} rows."
+            )
+
+        # ----------------------------------------------------
+        # INSERT
+        # ----------------------------------------------------
+
+        print()
+        print("[6] INSERT")
+
+        first_id = repository.insert(
             {
-                "Name": "MCM_TEST",
-                "Surname": "Repository",
+                "name": "First Record",
+                "value": 100,
+                "description": "Inserted by Milestone 2C",
             },
             commit=True,
         )
 
-        print(f"    Inserted primary key: {inserted_id}")
+        print_result("Inserted ID", first_id)
 
-        if inserted_id is None:
-            raise RuntimeError("INSERT did not return a primary key.")
+        if first_id is None:
+            raise AssertionError(
+                "Repository.insert() returned None."
+            )
 
-        # -----------------------------------------------------
-        # 6. Verify INSERT
-        # -----------------------------------------------------
+        # ----------------------------------------------------
+        # GET
+        # ----------------------------------------------------
 
-        inserted = repository.get(inserted_id)
+        print()
+        print("[7] GET")
 
-        print(f"    Inserted record: {inserted}")
+        first_record = repository.get(first_id)
 
-        if inserted is None:
-            raise RuntimeError("Inserted record could not be retrieved.")
+        print_result("Record", first_record)
 
-        if inserted["Name"] != "MCM_TEST":
-            raise RuntimeError("Inserted Name does not match.")
+        if first_record is None:
+            raise AssertionError(
+                "Repository.get() failed to retrieve inserted record."
+            )
 
-        if inserted["Surname"] != "Repository":
-            raise RuntimeError("Inserted Surname does not match.")
+        if first_record["name"] != "First Record":
+            raise AssertionError(
+                "Retrieved record has unexpected name."
+            )
 
-        if repository.row_count != initial_count + 1:
-            raise RuntimeError("Row count did not increase after INSERT.")
+        if first_record["value"] != 100:
+            raise AssertionError(
+                "Retrieved record has unexpected value."
+            )
 
-        print("    INSERT verified.")
+        # ----------------------------------------------------
+        # INSERT second record
+        # ----------------------------------------------------
 
-        # -----------------------------------------------------
-        # 7. UPDATE
-        # -----------------------------------------------------
+        print()
+        print("[8] INSERT second record")
 
-        print("\n[6] UPDATE")
+        second_id = repository.insert(
+            {
+                "name": "Second Record",
+                "value": 200,
+                "description": "Second CRUD record",
+            },
+            commit=True,
+        )
+
+        print_result("Inserted ID", second_id)
+
+        if second_id is None:
+            raise AssertionError(
+                "Second insert returned None."
+            )
+
+        # ----------------------------------------------------
+        # COUNT
+        # ----------------------------------------------------
+
+        print()
+        print("[9] COUNT")
+
+        count = repository.count()
+
+        print_result("Row count", count)
+
+        if count != 2:
+            raise AssertionError(
+                f"Expected 2 rows, got {count}."
+            )
+
+        # ----------------------------------------------------
+        # EXISTS
+        # ----------------------------------------------------
+
+        print()
+        print("[10] EXISTS")
+
+        first_exists = repository.exists(first_id)
+        second_exists = repository.exists(second_id)
+
+        print_result(
+            "First record exists",
+            first_exists,
+        )
+
+        print_result(
+            "Second record exists",
+            second_exists,
+        )
+
+        if not first_exists:
+            raise AssertionError(
+                "First record should exist."
+            )
+
+        if not second_exists:
+            raise AssertionError(
+                "Second record should exist."
+            )
+
+        # ----------------------------------------------------
+        # FIND
+        # ----------------------------------------------------
+
+        print()
+        print("[11] FIND")
+
+        records = repository.find(
+            {"value": 200},
+        )
+
+        print_result("Matching records", records)
+
+        if len(records) != 1:
+            raise AssertionError(
+                f"Expected one matching record, got {len(records)}."
+            )
+
+        if records[0]["name"] != "Second Record":
+            raise AssertionError(
+                "FIND returned the wrong record."
+            )
+
+        # ----------------------------------------------------
+        # FIND with ordering and limit
+        # ----------------------------------------------------
+
+        print()
+        print("[12] FIND with ordering and limit")
+
+        records = repository.find(
+            order_by="id",
+            limit=1,
+        )
+
+        print_result("First record", records)
+
+        if len(records) != 1:
+            raise AssertionError(
+                "Expected exactly one record from limited FIND."
+            )
+
+        if records[0]["id"] != first_id:
+            raise AssertionError(
+                "Ordered FIND returned the wrong record."
+            )
+
+        # ----------------------------------------------------
+        # UPDATE
+        # ----------------------------------------------------
+
+        print()
+        print("[13] UPDATE")
 
         updated = repository.update(
-            inserted_id,
+            first_id,
             {
-                "Name": "MCM_TEST_UPDATED",
-                "Surname": "RepositoryUpdated",
+                "name": "Updated Record",
+                "value": 999,
+                "description": "Updated by Milestone 2C",
             },
             commit=True,
         )
 
-        print(f"    Update result: {updated}")
+        print_result("Updated", updated)
 
         if not updated:
-            raise RuntimeError("UPDATE reported failure.")
-
-        updated_record = repository.get(inserted_id)
-
-        print(f"    Updated record: {updated_record}")
-
-        if updated_record is None:
-            raise RuntimeError("Updated record could not be retrieved.")
-
-        if updated_record["Name"] != "MCM_TEST_UPDATED":
-            raise RuntimeError("UPDATE did not change Name.")
-
-        if updated_record["Surname"] != "RepositoryUpdated":
-            raise RuntimeError("UPDATE did not change Surname.")
-
-        print("    UPDATE verified.")
-
-        # -----------------------------------------------------
-        # 8. EXISTS
-        # -----------------------------------------------------
-
-        print("\n[7] EXISTS")
-
-        exists = repository.exists(inserted_id)
-
-        print(f"    Record exists: {exists}")
-
-        if not exists:
-            raise RuntimeError(
-                "Record should exist before DELETE."
+            raise AssertionError(
+                "Repository.update() returned False."
             )
 
-        print("    EXISTS verified.")
+        updated_record = repository.get(first_id)
 
-        # -----------------------------------------------------
-        # 9. DELETE
-        # -----------------------------------------------------
+        print_result(
+            "Updated record",
+            updated_record,
+        )
 
-        print("\n[8] DELETE")
+        if updated_record is None:
+            raise AssertionError(
+                "Updated record could not be retrieved."
+            )
+
+        if updated_record["name"] != "Updated Record":
+            raise AssertionError(
+                "UPDATE did not change the name."
+            )
+
+        if updated_record["value"] != 999:
+            raise AssertionError(
+                "UPDATE did not change the value."
+            )
+
+        # ----------------------------------------------------
+        # DELETE
+        # ----------------------------------------------------
+
+        print()
+        print("[14] DELETE")
 
         deleted = repository.delete(
-            inserted_id,
+            second_id,
             commit=True,
         )
 
-        print(f"    Delete result: {deleted}")
+        print_result("Deleted", deleted)
 
         if not deleted:
-            raise RuntimeError("DELETE reported failure.")
+            raise AssertionError(
+                "Repository.delete() returned False."
+            )
 
-        # -----------------------------------------------------
-        # 10. Verify DELETE
-        # -----------------------------------------------------
+        # ----------------------------------------------------
+        # Verify DELETE
+        # ----------------------------------------------------
 
-        deleted_record = repository.get(inserted_id)
+        print()
+        print("[15] Verify DELETE")
 
-        print(f"    Record after DELETE: {deleted_record}")
+        deleted_record = repository.get(second_id)
+        remaining_count = repository.count()
+
+        print_result(
+            "Deleted record",
+            deleted_record,
+        )
+
+        print_result(
+            "Remaining rows",
+            remaining_count,
+        )
 
         if deleted_record is not None:
-            raise RuntimeError(
-                "Record still exists after DELETE."
+            raise AssertionError(
+                "Deleted record can still be retrieved."
             )
 
-        if repository.row_count != initial_count:
-            raise RuntimeError(
-                "Row count did not return to its original value."
+        if remaining_count != 1:
+            raise AssertionError(
+                f"Expected 1 remaining row, got {remaining_count}."
             )
 
-        print("    DELETE verified.")
+        # ----------------------------------------------------
+        # Final state
+        # ----------------------------------------------------
 
-    # ---------------------------------------------------------
-    # 11. Final result
-    # ---------------------------------------------------------
+        print()
+        print("[16] Final state")
 
-    print("\n" + "=" * 60)
-    print("MILESTONE 2A-B PASSED")
-    print("=" * 60)
+        final_records = repository.all()
 
-    print("\nAll CRUD operations were performed on:")
-    print(f"    {TEST_DATABASE.resolve()}")
+        for record in final_records:
+            print(f"    {record}")
 
-    print("\nYour original database was NOT modified:")
-    print(f"    {SOURCE_DATABASE.resolve()}")
+        if len(final_records) != 1:
+            raise AssertionError(
+                "Final table should contain exactly one record."
+            )
 
-    print("\nOperations verified:")
-    print("    INSERT")
-    print("    GET")
-    print("    UPDATE")
-    print("    EXISTS")
-    print("    DELETE")
+        if final_records[0]["id"] != first_id:
+            raise AssertionError(
+                "Unexpected final record."
+            )
+
+        print()
+        print("[17] Milestone 2C completed successfully.")
+
+    finally:
+        # ----------------------------------------------------
+        # Close the context.
+        # ----------------------------------------------------
+
+        if context is not None:
+            context.close()
+
+        print()
+        print("DatabaseContext closed.")
+
+        # ----------------------------------------------------
+        # Remove temporary table.
+        # ----------------------------------------------------
+
+        remove_test_table(TEST_DATABASE)
+
+        print("Temporary CRUD table removed.")
 
 
 if __name__ == "__main__":
