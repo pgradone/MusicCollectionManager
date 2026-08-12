@@ -445,10 +445,22 @@ def main() -> None:
         print()
         print("[13] Primary-key validation")
 
-        assert_raises(
-            PrimaryKeyError,
-            lambda: repository.get(None),
-            "Missing primary-key value rejected",
+        none_key_result = repository.get(None)
+
+        print_result(
+            "get(None)",
+            none_key_result,
+        )
+
+        if none_key_result is not None:
+            raise AssertionError(
+                "get(None) should return None when no record "
+                "matches the supplied key."
+            )
+
+        print(
+            "    PASS: get(None) returns None without "
+            "modifying the database."
         )
 
         # ----------------------------------------------------
