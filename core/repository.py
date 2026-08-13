@@ -340,6 +340,8 @@ class Repository:
         *,
         order_by: str | Sequence[str] | None = None,
         descending: bool = False,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         Return all rows.
@@ -351,6 +353,15 @@ class Repository:
             descending:
                 Apply DESC ordering when True.
 
+            limit:
+                Optional maximum number of rows to return.
+
+            offset:
+                Optional number of rows to skip. Requires SQLite
+                to receive a LIMIT clause, so an unbounded
+                ``LIMIT -1`` is added automatically when ``limit``
+                is not also given.
+
         Returns:
             List of ordinary dictionaries.
         """
@@ -359,6 +370,8 @@ class Repository:
             f"SELECT * FROM "
             f"{self._quote_identifier(self.table_name)}"
         )
+
+        parameters: list[Any] = []
 
         if order_by is not None:
             if isinstance(order_by, str):
@@ -379,7 +392,31 @@ class Repository:
             )
             sql += f" {direction}"
 
-        rows = self.db.fetchall(sql)
+        if limit is not None:
+            if limit < 0:
+                raise RepositoryValidationError(
+                    "limit cannot be negative."
+                )
+
+            sql += " LIMIT ?"
+            parameters.append(limit)
+
+        if offset is not None:
+            if offset < 0:
+                raise RepositoryValidationError(
+                    "offset cannot be negative."
+                )
+
+            if limit is None:
+                sql += " LIMIT -1"
+
+            sql += " OFFSET ?"
+            parameters.append(offset)
+
+        rows = self.db.fetchall(
+            sql,
+            tuple(parameters),
+        )
 
         return [
             self._row_to_dict(row)
