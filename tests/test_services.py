@@ -25,8 +25,11 @@ from core.context import DatabaseContext
 from core.database import QueryError
 from core.repository import RecordNotFoundError, repository_for
 from services.artist_service import ArtistService, ArtistValidationError
+from services.record_service import RecordService, RecordValidationError
 from services.song_service import SongService, SongValidationError
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 TEST_DATABASE = PROJECT_ROOT / "tests" / "Musi_crud_test.db"
 
 
@@ -71,6 +74,11 @@ def songs(context: DatabaseContext) -> SongService:
     """Provide a SongService bound to the CRUD test database."""
 
     return SongService(context)
+@pytest.fixture()
+def records(context: DatabaseContext) -> RecordService:
+    """Provide a RecordService bound to the CRUD test database."""
+
+    return RecordService(context)
 
 # ============================================================
 # Create / Read
@@ -522,3 +530,310 @@ def test_records_for_song_empty_for_new_song(
         assert songs.records_for_song(song_id) == []
     finally:
         songs.delete(song_id)
+
+# ============================================================
+# RecordService: Create / Read
+# ============================================================
+
+
+def test_record_create_and_get(records: RecordService) -> None:
+    record_id = records.create(title="Test Record", support="LP Vinyl")
+
+    try:
+        row = records.get(record_id)
+
+        assert row is not None
+        assert row["Title"] == "Test Record"
+        assert row["Support"] == "LP Vinyl"
+    finally:
+        records.delete(record_id)
+
+
+def test_record_create_rejects_blank_title(
+    records: RecordService,
+) -> None:
+    with pytest.raises(RecordValidationError):
+        records.create(title="   ")
+
+
+def test_record_create_validates_artist_exists(
+    records: RecordService,
+) -> None:
+    with pytest.raises(RecordNotFoundError):
+        records.create(title="Orphan", artist_id=999_999_999)
+
+
+# ============================================================
+# RecordService: Update
+# ============================================================
+
+
+def test_record_update_changes_title(records: RecordService) -> None:
+    record_id = records.create(title="Before")
+
+    try:
+        updated = records.update(record_id, title="After")
+        row = records.require(record_id)
+
+        assert updated is True
+        assert row["Title"] == "After"
+    finally:
+        records.delete(record_id)
+
+
+def test_record_update_requires_at_least_one_field(
+    records: RecordService,
+) -> None:
+    record_id = records.create(title="Lonely")
+
+    try:
+        with pytest.raises(RecordValidationError):
+            records.update(record_id)
+    finally:
+        records.delete(record_id)
+
+
+def test_record_update_unknown_record_raises_not_found(
+    records: RecordService,
+) -> None:
+    with pytest.raises(RecordNotFoundError):
+        records.update(999_999_999, title="Nobody")
+
+
+# ============================================================
+# RecordService: Delete
+# ============================================================
+
+
+def test_record_delete_removes_record(records: RecordService) -> None:
+    record_id = records.create(title="Temporary")
+
+    records.delete(record_id)
+
+    assert records.get(record_id) is None
+
+
+# ============================================================
+# RecordService: Record -> Artist (direct foreign key)
+# ============================================================
+
+
+def test_record_artist_for_record_none_when_unset(
+    records: RecordService,
+) -> None:
+    record_id = records.create(title="NoArtist")
+
+    try:
+        assert records.artist_for_record(record_id) is None
+    finally:
+        records.delete(record_id)
+
+
+def test_record_artist_for_record_returns_artist(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    artists_repo = repository_for(context, "Artists")
+    existing_artist = artists_repo.all(limit=1)[0]
+
+    record_id = records.create(
+        title="HasArtist",
+        artist_id=existing_artist["ArtistID"],
+    )
+
+    try:
+        artist = records.artist_for_record(record_id)
+
+        assert artist is not None
+        assert artist["ArtistID"] == existing_artist["ArtistID"]
+    finally:
+        records.delete(record_id)
+
+
+# ============================================================
+# RecordService: Record -> Tracks (Contain)
+# ============================================================
+
+
+def test_record_tracks_for_record_empty_when_no_tracks(
+    records: RecordService,
+) -> None:
+    record_id = records.create(title="NoTracksYet")
+
+    try:
+        assert records.tracks_for_record(record_id) == []
+    finally:
+        records.delete(record_id)
+
+
+def test_record_add_and_remove_track(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    record_id = records.create(title="TrackedRecord")
+
+    try:
+        records.add_track(
+            record_id,
+            existing_song["SongID"],
+            position="A1",
+        )
+
+        tracks = records.tracks_for_record(record_id)
+
+        assert [track["SongID"] for track in tracks] == [
+            existing_song["SongID"]
+        ]
+        assert tracks[0]["Position"] == "A1"
+
+        removed = records.remove_track(
+            record_id,
+            existing_song["SongID"],
+        )
+
+        assert removed is True
+        assert records.tracks_for_record(record_id) == []
+    finally:
+        records.delete(record_id)
+
+
+def test_record_add_track_twice_raises(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    record_id = records.create(title="DoubleTrackRecord")
+
+    try:
+        records.add_track(record_id, existing_song["SongID"])
+
+        with pytest.raises(RecordValidationError):
+            records.add_track(record_id, existing_song["SongID"])
+    finally:
+        records.remove_track(record_id, existing_song["SongID"])
+        records.delete(record_id)
+
+
+def test_record_add_track_duplicate_position_raises(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    first_song, second_song = songs_repo.all(limit=2)
+
+    record_id = records.create(title="CollidingPositions")
+
+    try:
+        records.add_track(
+            record_id, first_song["SongID"], position="A1"
+        )
+
+        with pytest.raises(RecordValidationError):
+            records.add_track(
+                record_id, second_song["SongID"], position="A1"
+            )
+    finally:
+        records.remove_track(record_id, first_song["SongID"])
+        records.delete(record_id)
+
+
+def test_record_reorder_track_changes_position(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    record_id = records.create(title="ReorderedRecord")
+
+    try:
+        records.add_track(
+            record_id, existing_song["SongID"], position="A1"
+        )
+
+        records.reorder_track(
+            record_id, existing_song["SongID"], "B3"
+        )
+
+        tracks = records.tracks_for_record(record_id)
+
+        assert tracks[0]["Position"] == "B3"
+    finally:
+        records.remove_track(record_id, existing_song["SongID"])
+        records.delete(record_id)
+
+
+def test_record_delete_with_track_raises(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    record_id = records.create(title="StillHasTrack")
+    records.add_track(record_id, existing_song["SongID"])
+
+    try:
+        with pytest.raises(QueryError):
+            records.delete(record_id)
+    finally:
+        records.remove_track(record_id, existing_song["SongID"])
+        records.delete(record_id)
+
+
+# ============================================================
+# RecordService: Record -> Discogs (optional single link)
+# ============================================================
+
+
+def test_record_link_and_unlink_discogs(
+    records: RecordService,
+    context: DatabaseContext,
+) -> None:
+    discogs_repo = repository_for(context, "Discogs")
+    linked_releases = {
+        row["Discogs_release"]
+        for row in repository_for(context, "Records").find(
+            {}
+        )
+        if row["Discogs_release"] is not None
+    }
+    free_release = next(
+        row["release_id"]
+        for row in discogs_repo.all(limit=20)
+        if row["release_id"] not in linked_releases
+    )
+
+    record_id = records.create(title="DiscogsLinked")
+
+    try:
+        assert records.discogs_info(record_id) is None
+
+        records.link_discogs(record_id, free_release)
+
+        info = records.discogs_info(record_id)
+        assert info is not None
+        assert info["release_id"] == free_release
+
+        records.unlink_discogs(record_id)
+
+        assert records.discogs_info(record_id) is None
+    finally:
+        records.delete(record_id)
+
+
+def test_record_link_discogs_unknown_release_raises(
+    records: RecordService,
+) -> None:
+    record_id = records.create(title="BadDiscogsLink")
+
+    try:
+        with pytest.raises(RecordNotFoundError):
+            records.link_discogs(record_id, "no-such-release-id")
+    finally:
+        records.delete(record_id)
