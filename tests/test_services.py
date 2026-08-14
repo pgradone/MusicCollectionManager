@@ -25,9 +25,9 @@ from core.context import DatabaseContext
 from core.database import QueryError
 from core.repository import RecordNotFoundError, repository_for
 from services.artist_service import ArtistService, ArtistValidationError
+from services.program_service import ProgramService, ProgramValidationError
 from services.record_service import RecordService, RecordValidationError
 from services.song_service import SongService, SongValidationError
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 TEST_DATABASE = PROJECT_ROOT / "tests" / "Musi_crud_test.db"
@@ -79,6 +79,11 @@ def records(context: DatabaseContext) -> RecordService:
     """Provide a RecordService bound to the CRUD test database."""
 
     return RecordService(context)
+@pytest.fixture()
+def programs(context: DatabaseContext) -> ProgramService:
+    """Provide a ProgramService bound to the CRUD test database."""
+
+    return ProgramService(context)
 
 # ============================================================
 # Create / Read
@@ -837,3 +842,275 @@ def test_record_link_discogs_unknown_release_raises(
             records.link_discogs(record_id, "no-such-release-id")
     finally:
         records.delete(record_id)
+
+# ============================================================
+# ProgramService: Create / Read
+# ============================================================
+
+
+def test_program_create_and_get(programs: ProgramService) -> None:
+    program_id = programs.create(
+        prog_name="Test Show",
+        description="A test broadcast",
+    )
+
+    try:
+        row = programs.get(program_id)
+
+        assert row is not None
+        assert row["ProgName"] == "Test Show"
+        assert row["Description"] == "A test broadcast"
+    finally:
+        programs.delete(program_id)
+
+
+def test_program_create_rejects_blank_name(
+    programs: ProgramService,
+) -> None:
+    with pytest.raises(ProgramValidationError):
+        programs.create(prog_name="   ")
+
+
+# ============================================================
+# ProgramService: Update
+# ============================================================
+
+
+def test_program_update_changes_name(
+    programs: ProgramService,
+) -> None:
+    program_id = programs.create(prog_name="Before")
+
+    try:
+        updated = programs.update(program_id, prog_name="After")
+        row = programs.require(program_id)
+
+        assert updated is True
+        assert row["ProgName"] == "After"
+    finally:
+        programs.delete(program_id)
+
+
+def test_program_update_requires_at_least_one_field(
+    programs: ProgramService,
+) -> None:
+    program_id = programs.create(prog_name="Lonely")
+
+    try:
+        with pytest.raises(ProgramValidationError):
+            programs.update(program_id)
+    finally:
+        programs.delete(program_id)
+
+
+def test_program_update_unknown_program_raises_not_found(
+    programs: ProgramService,
+) -> None:
+    with pytest.raises(RecordNotFoundError):
+        programs.update(999_999_999, prog_name="Nobody")
+
+
+# ============================================================
+# ProgramService: Delete
+# ============================================================
+
+
+def test_program_delete_removes_program(
+    programs: ProgramService,
+) -> None:
+    program_id = programs.create(prog_name="Temporary")
+
+    programs.delete(program_id)
+
+    assert programs.get(program_id) is None
+
+
+# ============================================================
+# ProgramService: Program -> Schedule (running order)
+# ============================================================
+
+
+def test_program_schedule_empty_when_no_songs(
+    programs: ProgramService,
+) -> None:
+    program_id = programs.create(prog_name="EmptyShow")
+
+    try:
+        assert programs.schedule_for_program(program_id) == []
+    finally:
+        programs.delete(program_id)
+
+
+def test_program_add_and_remove_song(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    program_id = programs.create(prog_name="ScheduledShow")
+
+    try:
+        programs.add_song(
+            program_id,
+            1.0,
+            song_id=existing_song["SongID"],
+            song_artist="Test Title * Test Artist",
+        )
+
+        schedule = programs.schedule_for_program(program_id)
+
+        assert len(schedule) == 1
+        assert schedule[0]["SongID"] == existing_song["SongID"]
+        assert (
+            schedule[0]["Song_Artist"]
+            == "Test Title * Test Artist"
+        )
+
+        removed = programs.remove_song(program_id, 1.0)
+
+        assert removed is True
+        assert programs.schedule_for_program(program_id) == []
+    finally:
+        programs.delete(program_id)
+
+
+def test_program_add_song_duplicate_position_raises(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    first_song, second_song = songs_repo.all(limit=2)
+
+    program_id = programs.create(prog_name="CollidingSlots")
+
+    try:
+        programs.add_song(
+            program_id, 1.0, song_id=first_song["SongID"]
+        )
+
+        with pytest.raises(ProgramValidationError):
+            programs.add_song(
+                program_id, 1.0, song_id=second_song["SongID"]
+            )
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)
+
+
+def test_program_add_song_without_song_id_allows_slot(
+    programs: ProgramService,
+) -> None:
+    program_id = programs.create(prog_name="AnnouncementShow")
+
+    try:
+        programs.add_song(
+            program_id,
+            1.0,
+            song_artist="[Station ID announcement]",
+        )
+
+        schedule = programs.schedule_for_program(program_id)
+
+        assert schedule[0]["SongID"] is None
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)
+
+
+def test_program_add_song_auto_fills_bpm_and_year(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = next(
+        song
+        for song in songs_repo.all(limit=50)
+        if song["BPM"] is not None and song["Year"] is not None
+    )
+
+    program_id = programs.create(prog_name="AutoFilledShow")
+
+    try:
+        programs.add_song(
+            program_id, 1.0, song_id=existing_song["SongID"]
+        )
+
+        schedule = programs.schedule_for_program(program_id)
+
+        assert schedule[0]["BPM"] == existing_song["BPM"]
+        assert schedule[0]["Year"] == existing_song["Year"]
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)
+
+
+def test_program_move_song_changes_position(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    program_id = programs.create(prog_name="ReorderedShow")
+
+    try:
+        programs.add_song(
+            program_id, 1.0, song_id=existing_song["SongID"]
+        )
+
+        programs.move_song(program_id, 1.0, 5.0)
+
+        schedule = programs.schedule_for_program(program_id)
+
+        assert len(schedule) == 1
+        assert schedule[0]["Position"] == 5.0
+        assert schedule[0]["SongID"] == existing_song["SongID"]
+    finally:
+        programs.remove_song(program_id, 5.0)
+        programs.delete(program_id)
+
+
+def test_program_move_song_to_taken_position_raises(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    first_song, second_song = songs_repo.all(limit=2)
+
+    program_id = programs.create(prog_name="BlockedMoveShow")
+
+    try:
+        programs.add_song(
+            program_id, 1.0, song_id=first_song["SongID"]
+        )
+        programs.add_song(
+            program_id, 2.0, song_id=second_song["SongID"]
+        )
+
+        with pytest.raises(ProgramValidationError):
+            programs.move_song(program_id, 1.0, 2.0)
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.remove_song(program_id, 2.0)
+        programs.delete(program_id)
+
+
+def test_program_delete_with_scheduled_song_raises(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    program_id = programs.create(prog_name="StillScheduled")
+    programs.add_song(
+        program_id, 1.0, song_id=existing_song["SongID"]
+    )
+
+    try:
+        with pytest.raises(QueryError):
+            programs.delete(program_id)
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)
