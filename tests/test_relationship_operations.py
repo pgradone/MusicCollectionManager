@@ -4,7 +4,7 @@ Music Collection Manager
 Relationship Operations Tests
 =========================================================
 
-Milestone 3G (2/N)
+Milestone 3G (2/N, 3/N)
 
 pytest tests for core/relationship_operations.py.
 
@@ -23,12 +23,20 @@ import pytest
 from core.context import DatabaseContext
 from core.relationship_operations import (
     RelationshipError,
+    get_target,
     link,
+    list_referencing,
     list_related,
     reorder,
+    set_target,
     unlink,
 )
-from core.relationships import Relationship, discover_relationships
+from core.relationships import (
+    DIRECT,
+    Relationship,
+    SoftForeignKey,
+    discover_relationships,
+)
 from core.repository import RecordNotFoundError, repository_for
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +93,65 @@ def contain_relationship(context: DatabaseContext) -> Relationship:
 
     return next(
         r for r in relationships if r.target_table == "Songs"
+    )
+
+
+@pytest.fixture()
+def discogs_relationship(context: DatabaseContext) -> Relationship:
+    """The Records -> Discogs direct relationship."""
+
+    relationships = discover_relationships(context, "Records")
+
+    return next(
+        r
+        for r in relationships
+        if r.kind == DIRECT and r.target_table == "Discogs"
+    )
+
+
+@pytest.fixture()
+def record_artist_soft_fk() -> SoftForeignKey:
+    """Records.ArtistID -> Artists.ArtistID is not a declared FK."""
+
+    return SoftForeignKey(
+        table="Records",
+        column="ArtistID",
+        referenced_table="Artists",
+        referenced_column="ArtistID",
+    )
+
+
+@pytest.fixture()
+def records_to_artist_relationship(
+    context: DatabaseContext,
+    record_artist_soft_fk: SoftForeignKey,
+) -> Relationship:
+    """The Records -> Artist direct relationship (soft FK)."""
+
+    relationships = discover_relationships(
+        context, "Records", soft_foreign_keys=[record_artist_soft_fk]
+    )
+
+    return next(
+        r
+        for r in relationships
+        if r.kind == DIRECT and r.target_table == "Artists"
+    )
+
+
+@pytest.fixture()
+def artist_to_records_relationship(
+    context: DatabaseContext,
+    record_artist_soft_fk: SoftForeignKey,
+) -> Relationship:
+    """The Artists <- Records reverse_direct relationship (soft FK)."""
+
+    relationships = discover_relationships(
+        context, "Artists", soft_foreign_keys=[record_artist_soft_fk]
+    )
+
+    return next(
+        r for r in relationships if r.target_table == "Records"
     )
 
 
@@ -446,3 +513,213 @@ def test_operations_reject_non_junction_relationship(
         reorder(
             context, direct_relationship, 1, "some-release", "X", 1
         )
+
+
+# ============================================================
+# get_target / set_target (direct)
+# ============================================================
+
+
+def test_get_target_none_when_fk_unset(
+    context: DatabaseContext,
+    discogs_relationship: Relationship,
+) -> None:
+    records = repository_for(context, "Records")
+    record_id = records.insert(
+        {"Title": "NoDiscogsYet"}, commit=True
+    )
+
+    try:
+        assert (
+            get_target(context, discogs_relationship, record_id)
+            is None
+        )
+    finally:
+        records.delete(record_id, commit=True)
+
+
+def test_set_target_and_get_target(
+    context: DatabaseContext,
+    discogs_relationship: Relationship,
+) -> None:
+    records = repository_for(context, "Records")
+    discogs = repository_for(context, "Discogs")
+
+    linked_releases = {
+        row["Discogs_release"]
+        for row in records.find({})
+        if row["Discogs_release"] is not None
+    }
+    free_release = next(
+        row["release_id"]
+        for row in discogs.all(limit=20)
+        if row["release_id"] not in linked_releases
+    )
+
+    record_id = records.insert(
+        {"Title": "WillBeLinked"}, commit=True
+    )
+
+    try:
+        set_target(
+            context, discogs_relationship, record_id, free_release
+        )
+
+        target = get_target(
+            context, discogs_relationship, record_id
+        )
+
+        assert target is not None
+        assert target["release_id"] == free_release
+
+        set_target(context, discogs_relationship, record_id, None)
+
+        assert (
+            get_target(context, discogs_relationship, record_id)
+            is None
+        )
+    finally:
+        records.delete(record_id, commit=True)
+
+
+def test_set_target_validates_own_key_exists(
+    context: DatabaseContext,
+    discogs_relationship: Relationship,
+) -> None:
+    discogs = repository_for(context, "Discogs")
+    any_release = discogs.all(limit=1)[0]
+
+    with pytest.raises(RecordNotFoundError):
+        set_target(
+            context,
+            discogs_relationship,
+            999_999_999,
+            any_release["release_id"],
+        )
+
+
+def test_set_target_validates_target_key_exists(
+    context: DatabaseContext,
+    discogs_relationship: Relationship,
+) -> None:
+    records = repository_for(context, "Records")
+    record_id = records.insert(
+        {"Title": "BadTargetRecord"}, commit=True
+    )
+
+    try:
+        with pytest.raises(RecordNotFoundError):
+            set_target(
+                context,
+                discogs_relationship,
+                record_id,
+                "no-such-release-id",
+            )
+    finally:
+        records.delete(record_id, commit=True)
+
+
+def test_set_target_with_soft_fk(
+    context: DatabaseContext,
+    records_to_artist_relationship: Relationship,
+) -> None:
+    records = repository_for(context, "Records")
+    artists = repository_for(context, "Artists")
+    existing_artist = artists.all(limit=1)[0]
+
+    record_id = records.insert(
+        {"Title": "SoftFkRecord"}, commit=True
+    )
+
+    try:
+        set_target(
+            context,
+            records_to_artist_relationship,
+            record_id,
+            existing_artist["ArtistID"],
+        )
+
+        target = get_target(
+            context, records_to_artist_relationship, record_id
+        )
+
+        assert target is not None
+        assert target["ArtistID"] == existing_artist["ArtistID"]
+    finally:
+        records.delete(record_id, commit=True)
+
+
+def test_get_target_rejects_wrong_kind(
+    context: DatabaseContext,
+    contain_relationship: Relationship,
+) -> None:
+    with pytest.raises(RelationshipError):
+        get_target(context, contain_relationship, 1)
+
+
+# ============================================================
+# list_referencing (reverse_direct)
+# ============================================================
+
+
+def test_list_referencing_empty_when_none(
+    context: DatabaseContext,
+    artist_to_records_relationship: Relationship,
+) -> None:
+    artists = repository_for(context, "Artists")
+    artist_id = artists.insert(
+        {"Surname": "NoRecordsYet"}, commit=True
+    )
+
+    try:
+        assert (
+            list_referencing(
+                context, artist_to_records_relationship, artist_id
+            )
+            == []
+        )
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_list_referencing_returns_matching_rows(
+    context: DatabaseContext,
+    records_to_artist_relationship: Relationship,
+    artist_to_records_relationship: Relationship,
+) -> None:
+    artists = repository_for(context, "Artists")
+    records = repository_for(context, "Records")
+
+    artist_id = artists.insert(
+        {"Surname": "HasARecord"}, commit=True
+    )
+    record_id = records.insert(
+        {"Title": "TheirOnlyRecord"}, commit=True
+    )
+
+    try:
+        set_target(
+            context,
+            records_to_artist_relationship,
+            record_id,
+            artist_id,
+        )
+
+        referencing = list_referencing(
+            context, artist_to_records_relationship, artist_id
+        )
+
+        assert [row["RecordID"] for row in referencing] == [
+            record_id
+        ]
+    finally:
+        records.delete(record_id, commit=True)
+        artists.delete(artist_id, commit=True)
+
+
+def test_list_referencing_rejects_wrong_kind(
+    context: DatabaseContext,
+    discogs_relationship: Relationship,
+) -> None:
+    with pytest.raises(RelationshipError):
+        list_referencing(context, discogs_relationship, 1)
