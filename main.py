@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 from PySide6.QtCore import QDate, QEvent, QObject, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QComboBox,
     QDateEdit,
@@ -33,7 +34,9 @@ from PySide6.QtWidgets import (
 )
 
 import config
+from core.context import DatabaseContext
 from core.database import ConnectionError, DatabaseManager, QueryError
+from core.relationships import JUNCTION, SoftForeignKey, discover_relationships
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +48,25 @@ MAIN_TABLES = ["Artists", "Songs", "Records", "Programs", "Styles"]
 MAIN_TABLE_CELL_LINKS: dict[str, dict[str, str]] = {
     "Records": {"ArtistID": "Artists"},
 }
+
+# Columns that function as foreign keys in the real data but were never
+# declared with a FOREIGN KEY constraint in the schema (confirmed by
+# inspecting the actual table DDL). Supplied to discover_relationships()
+# so the generic relationship engine can still find them.
+SOFT_FOREIGN_KEYS = [
+    SoftForeignKey(
+        table="Records",
+        column="ArtistID",
+        referenced_table="Artists",
+        referenced_column="ArtistID",
+    ),
+    SoftForeignKey(
+        table="Schedule",
+        column="SongID",
+        referenced_table="Songs",
+        referenced_column="SongID",
+    ),
+]
 
 
 class DatabaseInfo(TypedDict):
@@ -109,6 +131,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.db = DatabaseManager()
+        self.context = DatabaseContext(self.db)
         self.current_table = ""
         self.current_row: dict[str, Any] | None = None
         self.column_names: list[str] = []
@@ -200,6 +223,12 @@ class MainWindow(QMainWindow):
 
     def refresh_database(self) -> None:
         info = collect_database_info(self.db)
+
+        if info["connected"]:
+            if not self.context.started:
+                self.context.start(load_schema=True)
+            else:
+                self.context.refresh_schema()
 
         self.status_label.setText(
             f"Connected: {info['connected']}\nDatabase: {info['database']}"
@@ -335,14 +364,13 @@ class MainWindow(QMainWindow):
         Wire a form field up so double-clicking it navigates to the
         linked record, mirroring the main table's cell double-click.
         """
-        widgets = [field]
+        widgets: list[QWidget] = [field]
 
         # QSpinBox / QDoubleSpinBox render their text in an internal
         # QLineEdit, which receives mouse events directly - so the
         # filter must be installed there too, not just on the field.
-        line_edit_getter = getattr(field, "lineEdit", None)
-        if callable(line_edit_getter):
-            line_edit = line_edit_getter()
+        if isinstance(field, QAbstractSpinBox):
+            line_edit = field.lineEdit()
             if line_edit is not None:
                 widgets.append(line_edit)
 
@@ -353,7 +381,11 @@ class MainWindow(QMainWindow):
         field.setToolTip(f"Double-click to open the linked {target_table} record")
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.MouseButtonDblClick and obj in self._form_fk_links:
+        if (
+            isinstance(obj, QWidget)
+            and event.type() == QEvent.Type.MouseButtonDblClick
+            and obj in self._form_fk_links
+        ):
             column_name, target_table = self._form_fk_links[obj]
             self._on_form_field_double_clicked(column_name, target_table)
             return True
@@ -450,14 +482,45 @@ class MainWindow(QMainWindow):
                 return
 
     def _related_relationships(self) -> list[tuple[str, str]]:
-        relationships: dict[str, list[tuple[str, str]]] = {
-            "Artists": [("Songs", "Sing")],
-            "Songs": [("Artists", "Sing"), ("Records", "Contain"), ("Styles", "Belong"), ("Programs scheduling this Song", "ScheduledPrograms")],
-            "Records": [("Songs", "Contain")],
-            "Styles": [("Songs", "Belong")],
-            "Programs": [("Schedule", "Schedule")],
-        }
-        return relationships.get(self.current_table, [])
+        """
+        Return (tab_title, relation_marker) pairs for the current
+        table.
+
+        Real junction relationships (Sing, Contain, Belong) are
+        discovered generically from the schema via
+        discover_relationships() - no table names are hardcoded
+        for those. Schedule and the "which programs scheduled
+        this song" lookup are not junction tables under that
+        model (Schedule's own SongID reference is a soft FK, and
+        the Song -> Program lookup is two hops away through
+        Schedule), so they keep their existing special-cased
+        widgets, built by _build_schedule_subform() and
+        _build_scheduled_programs_subform().
+        """
+
+        if not self.current_table or not self.context.started:
+            return []
+
+        relationships: list[tuple[str, str]] = [
+            (relationship.target_table, relationship.junction_table)
+            for relationship in discover_relationships(
+                self.context,
+                self.current_table,
+                soft_foreign_keys=SOFT_FOREIGN_KEYS,
+            )
+            if relationship.kind == JUNCTION
+            and relationship.junction_table is not None
+        ]
+
+        if self.current_table == "Songs":
+            relationships.append(
+                ("Programs scheduling this Song", "ScheduledPrograms")
+            )
+
+        if self.current_table == "Programs":
+            relationships.append(("Schedule", "Schedule"))
+
+        return relationships
 
     def _update_related_tabs(self) -> None:
         for i in range(self.related_tabs.count()):
