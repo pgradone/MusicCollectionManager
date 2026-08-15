@@ -81,6 +81,7 @@ class Relationship:
     """
 
     kind: RelationshipKind
+    source_table: str
     target_table: str
 
     # "junction" only
@@ -227,6 +228,7 @@ def _junction_relationships(
         relationships.append(
             Relationship(
                 kind=JUNCTION,
+                source_table=table.name,
                 target_table=other_fk[1],
                 junction_table=junction.name,
                 own_fk_column=own_fk[0],
@@ -255,6 +257,7 @@ def _direct_relationships(
     return [
         Relationship(
             kind=DIRECT,
+            source_table=table.name,
             target_table=ref_table,
             fk_column=fk_column,
             fk_table=table.name,
@@ -289,6 +292,7 @@ def _reverse_direct_relationships(
         relationships.append(
             Relationship(
                 kind=REVERSE_DIRECT,
+                source_table=table.name,
                 target_table=owning_table_name,
                 fk_column=fk_column,
                 fk_table=owning_table_name,
