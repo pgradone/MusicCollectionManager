@@ -1114,3 +1114,39 @@ def test_program_delete_with_scheduled_song_raises(
     finally:
         programs.remove_song(program_id, 1.0)
         programs.delete(program_id)
+
+# ============================================================
+# SongService: Song -> Program relationship (Schedule, read-only)
+# ============================================================
+
+
+def test_programs_scheduling_song_empty_for_new_song(
+    songs: SongService,
+) -> None:
+    song_id = songs.create(title="NeverScheduled")
+
+    try:
+        assert songs.programs_scheduling_song(song_id) == []
+    finally:
+        songs.delete(song_id)
+
+
+def test_programs_scheduling_song_reflects_schedule(
+    songs: SongService,
+    programs: ProgramService,
+) -> None:
+    song_id = songs.create(title="ScheduledSong")
+    program_id = programs.create(prog_name="ShowForScheduledSong")
+
+    try:
+        programs.add_song(program_id, 1.0, song_id=song_id)
+
+        scheduled_on = songs.programs_scheduling_song(song_id)
+
+        assert len(scheduled_on) == 1
+        assert scheduled_on[0]["ProgramID"] == program_id
+        assert scheduled_on[0]["Position"] == 1.0
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)
+        songs.delete(song_id)

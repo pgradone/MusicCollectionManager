@@ -40,6 +40,8 @@ from core.database import ConnectionError, DatabaseError, DatabaseManager, Query
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
+from services.program_service import ProgramService, ProgramValidationError
+from services.song_service import SongService
 
 
 logger = logging.getLogger(__name__)
@@ -819,12 +821,8 @@ class MainWindow(QMainWindow):
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
 
-        rows = self.db.fetchall(
-            "SELECT s.*, sg.Title FROM [Schedule] s "
-            "LEFT JOIN [Songs] sg ON s.[SongID] = sg.[SongID] "
-            "WHERE s.[ProgramID] = ? ORDER BY CAST(s.[Position] AS INTEGER), s.[Position]",
-            (program_id,),
-        )
+        programs = ProgramService(self.context)
+        rows = programs.schedule_for_program(program_id)
 
         table.setRowCount(len(rows))
         for row_idx, row in enumerate(rows):
@@ -834,7 +832,8 @@ class MainWindow(QMainWindow):
                 spin.setRange(1, 999)
                 spin.setValue(int(pos))
                 spin.valueChanged.connect(
-                    lambda v, pid=program_id: self._set_schedule_position(pid, int(row["SongID"]), v)
+                    lambda v, pid=program_id, sid=row["SongID"]:
+                    self._set_schedule_position(pid, sid, v)
                 )
                 table.setCellWidget(row_idx, 0, spin)
             else:
@@ -869,15 +868,12 @@ class MainWindow(QMainWindow):
         return widget
 
     def _add_schedule_song(self, program_id: Any, table_widget: QTableWidget) -> None:
-        max_pos = self.db.fetchone(
-            "SELECT COALESCE(MAX([Position]), 0) AS max_pos FROM [Schedule] WHERE [ProgramID] = ?",
-            (program_id,),
-        )
-        next_pos = (int(max_pos["max_pos"]) + 1) if max_pos else 1
+        programs = ProgramService(self.context)
+        existing = programs.schedule_for_program(program_id)
+        next_pos = (max(int(entry["Position"]) for entry in existing) + 1) if existing else 1
 
-        rows = self.db.fetchall(
-            "SELECT [SongID], [Title], [BPM], [Year] FROM [Songs] ORDER BY [SongID]"
-        )
+        songs_repo = repository_for(self.context, "Songs")
+        rows = songs_repo.all(order_by="SongID")
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Song to Schedule")
@@ -915,11 +911,12 @@ class MainWindow(QMainWindow):
 
         song_id = item_ids[current_index]
 
-        self.db.execute(
-            "INSERT INTO [Schedule] ([ProgramID], [SongID], [Position]) VALUES (?, ?, ?)",
-            (program_id, song_id, pos_spin.value()),
-        )
-        self.db.commit()
+        try:
+            programs.add_song(program_id, float(pos_spin.value()), song_id=song_id)
+        except (ProgramValidationError, RecordNotFoundError) as exc:
+            QMessageBox.warning(self, "Cannot add", str(exc))
+            return
+
         self.load_table_data(self.current_table)
 
     def _delete_schedule_entry(self, program_id: Any, table_widget: QTableWidget) -> None:
@@ -934,11 +931,8 @@ class MainWindow(QMainWindow):
             return
         position = pos_widget.value()
 
-        self.db.execute(
-            "DELETE FROM [Schedule] WHERE [ProgramID] = ? AND [Position] = ?",
-            (program_id, position),
-        )
-        self.db.commit()
+        programs = ProgramService(self.context)
+        programs.remove_song(program_id, float(position))
         self.load_table_data(self.current_table)
 
     def _build_scheduled_programs_subform(self, song_id: Any) -> QWidget:
@@ -952,12 +946,8 @@ class MainWindow(QMainWindow):
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
 
-        rows = self.db.fetchall(
-            "SELECT s.[Position], s.[SongID], p.* FROM [Schedule] s "
-            "INNER JOIN [Programs] p ON s.[ProgramID] = p.[ProgramID] "
-            "WHERE s.[SongID] = ? ORDER BY p.[DateSched], p.[ProgName]",
-            (song_id,),
-        )
+        songs = SongService(self.context)
+        rows = songs.programs_scheduling_song(song_id)
 
         table.setRowCount(len(rows))
         for row_idx, row in enumerate(rows):
@@ -980,11 +970,27 @@ class MainWindow(QMainWindow):
         return widget
 
     def _set_schedule_position(self, program_id: Any, song_id: Any, new_pos: int) -> None:
-        self.db.execute(
-            "UPDATE [Schedule] SET [Position] = ? WHERE [ProgramID] = ? AND [SongID] = ?",
-            (new_pos, program_id, song_id),
-        )
-        self.db.commit()
+        # Position is part of Schedule's primary key, so this can't be
+        # a plain UPDATE - look up the song's current position fresh
+        # (rather than relying on a value captured when the spinbox
+        # was built) and let ProgramService.move_song() do the
+        # delete-and-reinsert. Looking it up fresh, instead of trusting
+        # a closure-captured old position, keeps this correct even if
+        # the same spinbox is edited more than once before a reload.
+        schedule_repo = repository_for(self.context, "Schedule")
+        matches = schedule_repo.find({"ProgramID": program_id, "SongID": song_id})
+        if not matches:
+            return
+
+        current_position = matches[0]["Position"]
+        if current_position == new_pos:
+            return
+
+        programs = ProgramService(self.context)
+        try:
+            programs.move_song(program_id, current_position, float(new_pos))
+        except (ProgramValidationError, RecordNotFoundError, DatabaseError) as exc:
+            logger.warning("Could not update schedule position: %s", exc)
 
     def _set_junction_field(
         self, relationship: Relationship, primary_value: Any,

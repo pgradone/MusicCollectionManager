@@ -48,6 +48,8 @@ class SongService(Service):
         self._styles: Repository = repository_for(context, "Styles")
         self._contain: Repository = repository_for(context, "Contain")
         self._records: Repository = repository_for(context, "Records")
+        self._schedule: Repository = repository_for(context, "Schedule")
+        self._programs: Repository = repository_for(context, "Programs")
 
     # ========================================================
     # Read
@@ -324,6 +326,45 @@ class SongService(Service):
         records.sort(key=lambda record: record["Title"] or "")
 
         return records
+
+    # ========================================================
+    # Song -> Program relationship (Schedule, read-only)
+    # ========================================================
+
+    def programs_scheduling_song(
+        self,
+        song_id: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Return every program that has scheduled this song, each with
+        its scheduled Position, ordered by the program's DateSched
+        then ProgName.
+
+        Adding, removing, and reordering schedule slots is owned by
+        ProgramService - this is a read-only reverse lookup, and
+        Schedule.SongID is a soft foreign key (never declared with a
+        FOREIGN KEY constraint in the schema).
+        """
+
+        self.require(song_id)
+
+        links = self._schedule.find({"SongID": song_id})
+
+        programs = []
+
+        for link in links:
+            program = dict(self._programs.require(link["ProgramID"]))
+            program["Position"] = link["Position"]
+            programs.append(program)
+
+        programs.sort(
+            key=lambda program: (
+                program["DateSched"] or "",
+                program["ProgName"] or "",
+            )
+        )
+
+        return programs
 
     # ========================================================
     # Internal helpers

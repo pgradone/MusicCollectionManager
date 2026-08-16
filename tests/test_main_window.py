@@ -32,6 +32,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QListWidget, QTa
 from core.relationship_operations import link, list_related, unlink
 from core.relationships import JUNCTION, discover_relationships
 from main import SOFT_FOREIGN_KEYS, MainWindow
+from services.program_service import ProgramService
+from services.song_service import SongService
 from core.repository import repository_for
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -532,3 +534,178 @@ def test_delete_record_removes_row(crud_window: MainWindow) -> None:
     crud_window.delete_record()
 
     assert artists.get(artist_id) is None
+
+
+# ============================================================
+# Schedule UI (Milestone 4B): add/delete/reposition + reverse lookup
+# ============================================================
+#
+# Schedule doesn't fit the generic junction/direct model (its own PK
+# includes Position, and SongID is a soft FK), so this stays on
+# ProgramService/SongService rather than the generic relationship
+# layer - these tests run against the CRUD test database.
+
+
+def test_add_schedule_song_auto_fills_bpm_and_year(
+    crud_window: MainWindow,
+) -> None:
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs_repo = repository_for(crud_window.context, "Songs")
+    existing_song = next(
+        s for s in songs_repo.all(limit=50) if s["BPM"] is not None
+    )
+    program_id = programs_repo.insert(
+        {"ProgName": "AddScheduleUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+
+    def fake_exec(dialog: QDialog) -> QDialog.DialogCode:
+        list_widget = dialog.findChild(QListWidget)
+        assert list_widget is not None
+        for i in range(list_widget.count()):
+            if list_widget.item(i).text().startswith(
+                str(existing_song["SongID"])
+            ):
+                list_widget.setCurrentRow(i)
+                break
+        return QDialog.DialogCode.Accepted
+
+    try:
+        idx = crud_window.table_combo.findText("Programs")
+        crud_window.table_combo.setCurrentIndex(idx)
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["ProgramID"] == program_id
+        )
+        crud_window.table_widget.selectRow(row_idx)
+
+        tab_widget = crud_window.related_tabs.widget(0)
+        assert tab_widget is not None
+        table_widget = tab_widget.findChild(QTableWidget)
+        assert table_widget is not None
+
+        with patch.object(QDialog, "exec", fake_exec):
+            crud_window._add_schedule_song(program_id, table_widget)
+
+        scheduled = program_service.schedule_for_program(program_id)
+        assert len(scheduled) == 1
+        assert scheduled[0]["SongID"] == existing_song["SongID"]
+        assert scheduled[0]["BPM"] == existing_song["BPM"]
+        assert scheduled[0]["Year"] == existing_song["Year"]
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_set_schedule_position_handles_repeated_edits(
+    crud_window: MainWindow,
+) -> None:
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs_repo = repository_for(crud_window.context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+    program_id = programs_repo.insert(
+        {"ProgName": "RepositionScheduleUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(
+        program_id, 1.0, song_id=existing_song["SongID"]
+    )
+
+    try:
+        crud_window._set_schedule_position(
+            program_id, existing_song["SongID"], 5
+        )
+        crud_window._set_schedule_position(
+            program_id, existing_song["SongID"], 7
+        )
+
+        scheduled = program_service.schedule_for_program(program_id)
+        assert len(scheduled) == 1
+        assert scheduled[0]["Position"] == 7.0
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_delete_schedule_entry_removes_slot(
+    crud_window: MainWindow,
+) -> None:
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs_repo = repository_for(crud_window.context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+    program_id = programs_repo.insert(
+        {"ProgName": "DeleteScheduleUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(
+        program_id, 1.0, song_id=existing_song["SongID"]
+    )
+
+    try:
+        idx = crud_window.table_combo.findText("Programs")
+        crud_window.table_combo.setCurrentIndex(idx)
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["ProgramID"] == program_id
+        )
+        crud_window.table_widget.selectRow(row_idx)
+
+        tab_widget = crud_window.related_tabs.widget(0)
+        assert tab_widget is not None
+        table_widget = tab_widget.findChild(QTableWidget)
+        assert table_widget is not None
+        table_widget.selectRow(0)
+
+        crud_window._delete_schedule_entry(program_id, table_widget)
+
+        assert program_service.schedule_for_program(program_id) == []
+    finally:
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_scheduled_programs_subform_shows_this_program(
+    crud_window: MainWindow,
+) -> None:
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs_repo = repository_for(crud_window.context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+    program_id = programs_repo.insert(
+        {"ProgName": "ReverseLookupUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(
+        program_id, 3.0, song_id=existing_song["SongID"]
+    )
+
+    try:
+        idx = crud_window.table_combo.findText("Songs")
+        crud_window.table_combo.setCurrentIndex(idx)
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["SongID"]
+            == existing_song["SongID"]
+        )
+        crud_window.table_widget.selectRow(row_idx)
+
+        # The "Programs scheduling this Song" tab is always last.
+        last_tab_index = crud_window.related_tabs.count() - 1
+        tab_widget = crud_window.related_tabs.widget(last_tab_index)
+        assert tab_widget is not None
+        table_widget = tab_widget.findChild(QTableWidget)
+        assert table_widget is not None
+
+        program_ids_shown = set()
+        for r in range(table_widget.rowCount()):
+            item = table_widget.item(r, 1)
+            if item is not None:
+                program_ids_shown.add(int(item.text()))
+        assert program_id in program_ids_shown
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
