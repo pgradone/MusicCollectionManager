@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 import config
 from core.context import DatabaseContext
-from core.database import ConnectionError, DatabaseManager, QueryError
+from core.database import ConnectionError, DatabaseError, DatabaseManager, QueryError
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
@@ -301,9 +301,9 @@ class MainWindow(QMainWindow):
         self.column_types = {column["name"]: str(column["type"]) for column in self.db.columns(table_name)}
         self._build_form_fields()
 
-        query = build_table_query(table_name, self.db)
-        rows = self.db.fetchall(query)
-        self.table_rows = [dict(row) for row in rows]
+        primary_key = self.db.primary_key(table_name)
+        repository = repository_for(self.context, table_name)
+        self.table_rows = repository.all(order_by=primary_key)
 
         self.table_widget.setSortingEnabled(False)
         self.table_widget.setColumnCount(len(self.column_names))
@@ -1317,44 +1317,35 @@ class MainWindow(QMainWindow):
         try:
             primary_key = self.db.primary_key(self.current_table)
             values = self._collect_form_values()
+            repository = repository_for(self.context, self.current_table)
 
-            if self.current_row is None or primary_key is None:
-                insert_columns = [name for name in self.column_names if name != primary_key]
-                if not insert_columns:
-                    self.db.execute(f"INSERT INTO [{self.current_table}] DEFAULT VALUES")
-                else:
-                    placeholders = ", ".join("?" for _ in insert_columns)
-                    columns_sql = ", ".join(f"[{name}]" for name in insert_columns)
-                    sql = f"INSERT INTO [{self.current_table}] ({columns_sql}) VALUES ({placeholders})"
-                    params = [values.get(name) for name in insert_columns]
-                    self.db.execute(sql, params)
-            elif self.current_row.get(primary_key) in (None, ""):
-                insert_columns = [name for name in self.column_names if name != primary_key]
-                if not insert_columns:
-                    self.db.execute(f"INSERT INTO [{self.current_table}] DEFAULT VALUES")
-                else:
-                    placeholders = ", ".join("?" for _ in insert_columns)
-                    columns_sql = ", ".join(f"[{name}]" for name in insert_columns)
-                    sql = f"INSERT INTO [{self.current_table}] ({columns_sql}) VALUES ({placeholders})"
-                    params = [values.get(name) for name in insert_columns]
-                    self.db.execute(sql, params)
-            else:
-                update_columns = [name for name in self.column_names if name != primary_key]
-                assignments = ", ".join(f"[{name}] = ?" for name in update_columns)
-                sql = f"UPDATE [{self.current_table}] SET {assignments} WHERE [{primary_key}] = ?"
-                params = [values.get(name) for name in update_columns]
-                params.append(self.current_row[primary_key])
-                self.db.execute(sql, params)
+            is_new_row = (
+                self.current_row is None
+                or primary_key is None
+                or self.current_row.get(primary_key) in (None, "")
+            )
 
-            self.db.commit()
-            if self.current_row is None or primary_key is None:
-                self.message_label.setText("New row added.")
-            elif self.current_row.get(primary_key) in (None, ""):
+            field_values = {
+                name: values.get(name)
+                for name in self.column_names
+                if name != primary_key
+            }
+
+            if is_new_row:
+                repository.insert(field_values, commit=True)
                 self.message_label.setText("New row added.")
             else:
+                assert primary_key is not None
+                assert self.current_row is not None
+                repository.update(
+                    self.current_row[primary_key],
+                    field_values,
+                    commit=True,
+                )
                 self.message_label.setText("Record saved.")
+
             self.load_table_data(self.current_table)
-        except (QueryError, ValueError, TypeError) as exc:
+        except (DatabaseError, ValueError, TypeError) as exc:
             self.message_label.setText(f"Save failed: {exc}")
             QMessageBox.critical(self, "Save failed", str(exc))
 
@@ -1367,12 +1358,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            sql = f"DELETE FROM [{self.current_table}] WHERE [{primary_key}] = ?"
-            self.db.execute(sql, (self.current_row[primary_key],))
-            self.db.commit()
+            repository = repository_for(self.context, self.current_table)
+            repository.delete(self.current_row[primary_key], commit=True)
             self.message_label.setText("Record deleted.")
             self.load_table_data(self.current_table)
-        except (QueryError, ValueError, TypeError) as exc:
+        except (DatabaseError, ValueError, TypeError) as exc:
             self.message_label.setText(f"Delete failed: {exc}")
             QMessageBox.critical(self, "Delete failed", str(exc))
 

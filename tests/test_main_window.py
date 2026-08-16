@@ -27,7 +27,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from PySide6.QtWidgets import QApplication, QDialog, QListWidget, QTableWidget
+from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QListWidget, QTableWidget
 
 from core.relationship_operations import link, list_related, unlink
 from core.relationships import JUNCTION, discover_relationships
@@ -448,3 +448,87 @@ def test_form_field_double_click_navigates_to_linked_artist(
     assert window.current_table == "Artists"
     assert window.current_row is not None
     assert window.current_row["ArtistID"] == artist_id
+
+
+def _set_form_field_text(window: MainWindow, field_name: str, text: str) -> None:
+    """
+    Set text on a form field, narrowing the QWidget type first.
+    form_fields is typed dict[str, QWidget] since fields can be
+    QLineEdit, QSpinBox, QDoubleSpinBox, or QDateEdit - every real
+    field used by these tests is a QLineEdit.
+    """
+
+    field = window.form_fields[field_name]
+    assert isinstance(field, QLineEdit)
+    field.setText(text)
+
+
+# ============================================================
+# Master-table CRUD (Milestone 4A (4/N))
+# ============================================================
+#
+# These run against the dedicated CRUD test database and clean up
+# whatever they create, exactly like the junction UI tests above.
+
+
+def test_save_record_inserts_new_row(crud_window: MainWindow) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+
+    crud_window.load_table_data("Artists")
+    crud_window.start_new_record()
+    _set_form_field_text(crud_window, "Surname", "InsertUITest")
+    _set_form_field_text(crud_window, "Name", "Alex")
+    crud_window.save_record()
+
+    try:
+        new_row = next(
+            row
+            for row in crud_window.table_rows
+            if row["Surname"] == "InsertUITest"
+        )
+        assert new_row["Name"] == "Alex"
+    finally:
+        row = artists.find({"Surname": "InsertUITest"})
+        if row:
+            artists.delete(row[0]["ArtistID"], commit=True)
+
+
+def test_save_record_updates_existing_row(crud_window: MainWindow) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "UpdateUITest"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["ArtistID"] == artist_id
+        )
+        crud_window.table_widget.selectRow(row_idx)
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["ArtistID"] == artist_id
+
+        _set_form_field_text(crud_window, "Surname", "UpdateUITestChanged")
+        crud_window.save_record()
+
+        updated = artists.require(artist_id)
+        assert updated["Surname"] == "UpdateUITestChanged"
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_delete_record_removes_row(crud_window: MainWindow) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "DeleteUITest"}, commit=True)
+
+    crud_window.load_table_data("Artists")
+    row_idx = next(
+        r
+        for r in range(len(crud_window.table_rows))
+        if crud_window.table_rows[r]["ArtistID"] == artist_id
+    )
+    crud_window.table_widget.selectRow(row_idx)
+
+    crud_window.delete_record()
+
+    assert artists.get(artist_id) is None
