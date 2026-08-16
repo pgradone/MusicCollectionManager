@@ -38,19 +38,13 @@ import config
 from core.context import DatabaseContext
 from core.database import ConnectionError, DatabaseManager, QueryError
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
-from core.relationships import JUNCTION, Relationship, SoftForeignKey, discover_relationships
+from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
 
 
 logger = logging.getLogger(__name__)
 
 MAIN_TABLES = ["Artists", "Songs", "Records", "Programs", "Styles"]
-
-# Foreign-key columns in the main table grid that should navigate to another
-# table on double-click, e.g. Records.ArtistID -> the record's Main Artist.
-MAIN_TABLE_CELL_LINKS: dict[str, dict[str, str]] = {
-    "Records": {"ArtistID": "Artists"},
-}
 
 # Columns that function as foreign keys in the real data but were never
 # declared with a FOREIGN KEY constraint in the schema (confirmed by
@@ -355,7 +349,7 @@ class MainWindow(QMainWindow):
 
         self.form_fields = {}
         self._form_fk_links = {}
-        links = MAIN_TABLE_CELL_LINKS.get(self.current_table, {})
+        links = self._direct_cell_links()
         for column_name in self.column_names:
             column_type = self.column_types.get(column_name, "")
             normalized = column_type.lower()
@@ -453,7 +447,7 @@ class MainWindow(QMainWindow):
         return -1
 
     def _on_main_table_double_clicked(self, row: int, column: int) -> None:
-        links = MAIN_TABLE_CELL_LINKS.get(self.current_table)
+        links = self._direct_cell_links()
         if not links or column >= len(self.column_names):
             return
 
@@ -502,6 +496,36 @@ class MainWindow(QMainWindow):
                 self.table_widget.selectRow(visual_row)
                 self.table_widget.setFocus()
                 return
+
+    def _direct_cell_links(self) -> dict[str, str]:
+        """
+        Return {column_name: target_table} for every "direct" foreign
+        key on the current table that points at a table the user can
+        actually browse to (MAIN_TABLES) - used to wire up double-
+        click navigation on grid cells and form fields.
+
+        Discovered generically via discover_relationships() - no
+        column or table names are hardcoded here. A relationship
+        pointing at a table outside MAIN_TABLES (e.g.
+        Records.Discogs_release -> Discogs) is excluded, since
+        _navigate_to_related_value() can only jump to tables in the
+        table selector.
+        """
+
+        if not self.current_table or not self.context.started:
+            return {}
+
+        return {
+            relationship.fk_column: relationship.target_table
+            for relationship in discover_relationships(
+                self.context,
+                self.current_table,
+                soft_foreign_keys=SOFT_FOREIGN_KEYS,
+            )
+            if relationship.kind == DIRECT
+            and relationship.target_table in MAIN_TABLES
+            and relationship.fk_column is not None
+        }
 
     def _related_relationships(self) -> list[tuple[str, str]]:
         """

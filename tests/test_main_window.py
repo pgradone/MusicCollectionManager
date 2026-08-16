@@ -375,3 +375,76 @@ def test_renumber_junction_positions_assigns_sequential_values(
         unlink(crud_window.context, relationship, record_id, song_a["SongID"])
         unlink(crud_window.context, relationship, record_id, song_b["SongID"])
         records.delete(record_id, commit=True)
+
+
+# ============================================================
+# Direct-relationship (FK) double-click navigation (Milestone 4A (3/N))
+# ============================================================
+
+
+def test_direct_cell_links_matches_expected_per_table(
+    window: MainWindow,
+) -> None:
+    expected = {
+        "Artists": {},
+        "Songs": {},
+        "Records": {"ArtistID": "Artists"},
+        "Styles": {},
+        "Programs": {},
+    }
+
+    for table, links in expected.items():
+        window.current_table = table
+        assert window._direct_cell_links() == links
+
+
+def _select_table_via_combo(window: MainWindow, table: str) -> None:
+    """
+    Switch tables the way a real user would - through the combo box -
+    so window.table_combo and window.current_table stay in sync.
+    Calling load_table_data() directly leaves the combo pointed at
+    its old selection, which breaks _navigate_to_related_value()'s
+    own findText()-based lookup.
+    """
+
+    index = window.table_combo.findText(table)
+    assert index >= 0
+    window.table_combo.setCurrentIndex(index)
+
+
+def test_grid_double_click_navigates_to_linked_artist(
+    window: MainWindow,
+) -> None:
+    _select_table_via_combo(window, "Records")
+
+    row_index, artist_id = next(
+        (r, row["ArtistID"])
+        for r, row in enumerate(window.table_rows)
+        if row.get("ArtistID")
+    )
+    col = window.column_names.index("ArtistID")
+
+    window._on_main_table_double_clicked(row_index, col)
+
+    assert window.current_table == "Artists"
+    assert window.current_row is not None
+    assert window.current_row["ArtistID"] == artist_id
+
+
+def test_form_field_double_click_navigates_to_linked_artist(
+    window: MainWindow,
+) -> None:
+    _select_table_via_combo(window, "Records")
+
+    row_index, artist_id = next(
+        (r, row["ArtistID"])
+        for r, row in enumerate(window.table_rows)
+        if row.get("ArtistID")
+    )
+    window.table_widget.selectRow(row_index)
+
+    window._on_form_field_double_clicked("ArtistID", "Artists")
+
+    assert window.current_table == "Artists"
+    assert window.current_row is not None
+    assert window.current_row["ArtistID"] == artist_id
