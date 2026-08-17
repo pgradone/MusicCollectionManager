@@ -265,3 +265,207 @@ def test_recent_limit_controls_result_count(
     stats = reports.dashboard_stats(recent_limit=3)
 
     assert len(stats.recently_added_programs) == 3
+
+# ============================================================
+# Integrity / anomaly reports
+# ============================================================
+
+
+def test_songs_without_artists_includes_new_unlinked_song(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    songs = repository_for(context, "Songs")
+    song_id = songs.insert({"Title": "UnlinkedArtistTestSong"}, commit=True)
+
+    try:
+        results = reports.songs_without_artists()
+        assert any(song["SongID"] == song_id for song in results)
+    finally:
+        songs.delete(song_id, commit=True)
+
+
+def test_songs_without_artists_excludes_linked_song(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    songs = repository_for(context, "Songs")
+    sing = repository_for(context, "Sing")
+    artists = repository_for(context, "Artists")
+    existing_artist = artists.all(limit=1)[0]
+
+    song_id = songs.insert({"Title": "LinkedArtistTestSong"}, commit=True)
+    sing.insert(
+        {"ArtistID": existing_artist["ArtistID"], "SongID": song_id},
+        commit=True,
+    )
+
+    try:
+        results = reports.songs_without_artists()
+        assert all(song["SongID"] != song_id for song in results)
+    finally:
+        sing.delete(
+            {"ArtistID": existing_artist["ArtistID"], "SongID": song_id},
+            commit=True,
+        )
+        songs.delete(song_id, commit=True)
+
+
+def test_songs_without_records_includes_new_unlinked_song(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    songs = repository_for(context, "Songs")
+    song_id = songs.insert({"Title": "UnlinkedRecordTestSong"}, commit=True)
+
+    try:
+        results = reports.songs_without_records()
+        assert any(song["SongID"] == song_id for song in results)
+    finally:
+        songs.delete(song_id, commit=True)
+
+
+def test_artists_without_songs_includes_new_unlinked_artist(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    artists = repository_for(context, "Artists")
+    artist_id = artists.insert(
+        {"Surname": "UnlinkedSongsTestArtist"}, commit=True
+    )
+
+    try:
+        results = reports.artists_without_songs()
+        assert any(
+            artist["ArtistID"] == artist_id for artist in results
+        )
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_records_without_songs_includes_new_unlinked_record(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    records = repository_for(context, "Records")
+    record_id = records.insert(
+        {"Title": "UnlinkedSongsTestRecord"}, commit=True
+    )
+
+    try:
+        results = reports.records_without_songs()
+        assert any(
+            record["RecordID"] == record_id for record in results
+        )
+    finally:
+        records.delete(record_id, commit=True)
+
+
+def test_duplicate_artists_finds_case_insensitive_match(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    artists = repository_for(context, "Artists")
+    first_id = artists.insert(
+        {"Surname": "DupeTestSurname", "Name": "Alex"}, commit=True
+    )
+    second_id = artists.insert(
+        {"Surname": "  dupetestsurname  ", "Name": "ALEX"}, commit=True
+    )
+
+    try:
+        groups = reports.duplicate_artists()
+        matching_group = next(
+            (
+                group
+                for group in groups
+                if any(a["ArtistID"] == first_id for a in group)
+            ),
+            None,
+        )
+        assert matching_group is not None
+        found_ids = {a["ArtistID"] for a in matching_group}
+        assert found_ids == {first_id, second_id}
+    finally:
+        artists.delete(first_id, commit=True)
+        artists.delete(second_id, commit=True)
+
+
+def test_duplicate_artists_never_groups_null_surnames(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    artists = repository_for(context, "Artists")
+    first_id = artists.insert({"Surname": "NoSurnameA"}, commit=True)
+    # Two artists with genuinely no surname must never be treated as
+    # duplicates of each other.
+    second_id = artists.insert({"Surname": "NoSurnameB"}, commit=True)
+
+    try:
+        groups = reports.duplicate_artists()
+        for group in groups:
+            group_ids = {a["ArtistID"] for a in group}
+            assert not ({first_id, second_id} <= group_ids)
+    finally:
+        artists.delete(first_id, commit=True)
+        artists.delete(second_id, commit=True)
+
+
+def test_songs_sung_by_many_artists_includes_collaboration(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    songs = repository_for(context, "Songs")
+    artists = repository_for(context, "Artists")
+    sing = repository_for(context, "Sing")
+
+    song_id = songs.insert({"Title": "CollabTestSong"}, commit=True)
+    artist_a_id = artists.insert(
+        {"Surname": "CollabArtistA"}, commit=True
+    )
+    artist_b_id = artists.insert(
+        {"Surname": "CollabArtistB"}, commit=True
+    )
+    sing.insert({"ArtistID": artist_a_id, "SongID": song_id}, commit=True)
+    sing.insert({"ArtistID": artist_b_id, "SongID": song_id}, commit=True)
+
+    try:
+        results = reports.songs_sung_by_many_artists()
+        entry = next(
+            (song for song in results if song["SongID"] == song_id),
+            None,
+        )
+        assert entry is not None
+        found_artist_ids = {a["ArtistID"] for a in entry["artists"]}
+        assert found_artist_ids == {artist_a_id, artist_b_id}
+    finally:
+        sing.delete(
+            {"ArtistID": artist_a_id, "SongID": song_id}, commit=True
+        )
+        sing.delete(
+            {"ArtistID": artist_b_id, "SongID": song_id}, commit=True
+        )
+        songs.delete(song_id, commit=True)
+        artists.delete(artist_a_id, commit=True)
+        artists.delete(artist_b_id, commit=True)
+
+
+def test_songs_sung_by_many_artists_excludes_single_artist_song(
+    reports: ReportService,
+    context: DatabaseContext,
+) -> None:
+    songs = repository_for(context, "Songs")
+    artists = repository_for(context, "Artists")
+    sing = repository_for(context, "Sing")
+
+    song_id = songs.insert({"Title": "SoloTestSong"}, commit=True)
+    artist_id = artists.insert({"Surname": "SoloTestArtist"}, commit=True)
+    sing.insert({"ArtistID": artist_id, "SongID": song_id}, commit=True)
+
+    try:
+        results = reports.songs_sung_by_many_artists()
+        assert all(song["SongID"] != song_id for song in results)
+    finally:
+        sing.delete({"ArtistID": artist_id, "SongID": song_id}, commit=True)
+        songs.delete(song_id, commit=True)
+        artists.delete(artist_id, commit=True)
