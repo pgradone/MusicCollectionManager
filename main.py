@@ -4,6 +4,7 @@ import logging
 import re
 import sqlite3
 import sys
+from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from PySide6.QtCore import QDate, QEvent, QObject, Qt
@@ -41,6 +42,7 @@ from core.relationship_operations import RelationshipError, link, list_related, 
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
 from services.program_service import ProgramService, ProgramValidationError
+from services.report_service import ReportService
 from services.song_service import SongService
 
 
@@ -64,6 +66,47 @@ SOFT_FOREIGN_KEYS = [
         column="SongID",
         referenced_table="Songs",
         referenced_column="SongID",
+    ),
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportDefinition:
+    """
+    UI-level metadata for one ReportService report: which method to
+    call, what to label it, and which table/column a row's primary
+    key belongs to (for double-click navigation back to Browse).
+    """
+
+    method_name: str
+    title: str
+    target_table: str
+    target_pk: str
+
+
+# Curated from the legacy Musi.accdb's saved queries (confirmed via
+# its object catalog) - see services/report_service.py.
+REPORT_DEFINITIONS: list[ReportDefinition] = [
+    ReportDefinition(
+        "songs_without_artists", "Songs without an Artist", "Songs", "SongID"
+    ),
+    ReportDefinition(
+        "songs_without_records", "Songs not on any Record", "Songs", "SongID"
+    ),
+    ReportDefinition(
+        "artists_without_songs", "Artists without a Song", "Artists", "ArtistID"
+    ),
+    ReportDefinition(
+        "records_without_songs", "Records without a Song", "Records", "RecordID"
+    ),
+    ReportDefinition(
+        "duplicate_artists", "Possible duplicate Artists", "Artists", "ArtistID"
+    ),
+    ReportDefinition(
+        "songs_sung_by_many_artists",
+        "Songs sung by multiple Artists",
+        "Songs",
+        "SongID",
     ),
 ]
 
@@ -235,7 +278,14 @@ class MainWindow(QMainWindow):
 
         container = QWidget(self)
         container.setLayout(main_layout)
-        self.setCentralWidget(container)
+
+        self.main_tabs = QTabWidget()
+        self.main_tabs.addTab(container, "Browse")
+        self.main_tabs.addTab(self._build_dashboard_tab(), "Dashboard")
+        self.main_tabs.addTab(self._build_reports_tab(), "Reports")
+        self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
+
+        self.setCentralWidget(self.main_tabs)
 
         self.refresh_database()
 
@@ -484,6 +534,8 @@ class MainWindow(QMainWindow):
         self._navigate_to_related_value(target_table, target_pk, item.text())
 
     def _navigate_to_related_value(self, target_table: str, target_pk: str, pk_value: str) -> None:
+        self.main_tabs.setCurrentIndex(0)  # Browse tab
+
         idx = self.table_combo.findText(target_table)
         if idx < 0:
             return
@@ -498,6 +550,255 @@ class MainWindow(QMainWindow):
                 self.table_widget.selectRow(visual_row)
                 self.table_widget.setFocus()
                 return
+
+    def _on_main_tab_changed(self, index: int) -> None:
+        if not self.context.started:
+            return
+
+        widget = self.main_tabs.widget(index)
+
+        if widget is self._dashboard_widget:
+            self._refresh_dashboard()
+        elif widget is self._reports_widget:
+            self._run_selected_report()
+
+    # ========================================================
+    # Dashboard tab
+    # ========================================================
+
+    def _build_dashboard_tab(self) -> QWidget:
+        widget = QWidget()
+        self._dashboard_widget = widget
+        layout = QVBoxLayout(widget)
+
+        top_row = QHBoxLayout()
+        top_row.addStretch(1)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self._refresh_dashboard)
+        top_row.addWidget(refresh_btn)
+        layout.addLayout(top_row)
+
+        form = QFormLayout()
+        self._dashboard_labels: dict[str, QLabel] = {}
+        for key, caption in [
+            ("counts", "Collection size"),
+            ("average_bpm", "Average BPM"),
+            ("collection_value", "Current collection value"),
+            ("sold_value", "Sold value"),
+            ("missing_metadata", "Missing metadata"),
+        ]:
+            label = QLabel("-")
+            label.setWordWrap(True)
+            self._dashboard_labels[key] = label
+            form.addRow(caption + ":", label)
+        layout.addLayout(form)
+
+        layout.addWidget(QLabel("Recently created Programs:"))
+        self._dashboard_recent_table = QTableWidget()
+        self._dashboard_recent_table.setColumnCount(3)
+        self._dashboard_recent_table.setHorizontalHeaderLabels(
+            ["ProgramID", "ProgName", "DateCreate"]
+        )
+        self._dashboard_recent_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self._dashboard_recent_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._dashboard_recent_table.cellDoubleClicked.connect(
+            lambda r, c: self._navigate_to_record(
+                "Programs", "ProgramID", self._dashboard_recent_table, r
+            )
+        )
+        layout.addWidget(self._dashboard_recent_table)
+
+        return widget
+
+    def _refresh_dashboard(self) -> None:
+        if not self.context.started:
+            return
+
+        reports = ReportService(self.context)
+        stats = reports.dashboard_stats()
+
+        self._dashboard_labels["counts"].setText(
+            f"{stats.artist_count} Artists, {stats.song_count} Songs, "
+            f"{stats.record_count} Records, {stats.program_count} Programs, "
+            f"{stats.style_count} Styles"
+        )
+
+        if stats.average_bpm is not None:
+            self._dashboard_labels["average_bpm"].setText(
+                f"{stats.average_bpm:.1f} "
+                f"(from {stats.songs_with_bpm} songs with BPM set)"
+            )
+        else:
+            self._dashboard_labels["average_bpm"].setText(
+                "No songs have BPM set"
+            )
+
+        self._dashboard_labels["collection_value"].setText(
+            f"\u20ac{stats.collection_value_eur:,.2f} across "
+            f"{stats.unsold_record_count} unsold records"
+        )
+        self._dashboard_labels["sold_value"].setText(
+            f"\u20ac{stats.sold_value_eur:,.2f} across "
+            f"{stats.sold_record_count} sold records"
+        )
+        self._dashboard_labels["missing_metadata"].setText(
+            f"{stats.songs_missing_bpm} songs missing BPM, "
+            f"{stats.songs_missing_year} songs missing Year, "
+            f"{stats.records_missing_artist} records missing an Artist"
+        )
+
+        recent = stats.recently_added_programs
+        self._dashboard_recent_table.setRowCount(len(recent))
+        for row_idx, program in enumerate(recent):
+            for col_idx, col_name in enumerate(
+                ["ProgramID", "ProgName", "DateCreate"]
+            ):
+                value = program.get(col_name)
+                item = TableItem("" if value is None else str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._dashboard_recent_table.setItem(row_idx, col_idx, item)
+        self._dashboard_recent_table.resizeColumnsToContents()
+
+    # ========================================================
+    # Reports tab
+    # ========================================================
+
+    def _build_reports_tab(self) -> QWidget:
+        widget = QWidget()
+        self._reports_widget = widget
+        layout = QVBoxLayout(widget)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Report:"))
+        self._report_combo = QComboBox()
+        for definition in REPORT_DEFINITIONS:
+            self._report_combo.addItem(definition.title, definition.method_name)
+        controls.addWidget(self._report_combo, 1)
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self._run_selected_report)
+        controls.addWidget(refresh_btn)
+        layout.addLayout(controls)
+
+        self._report_combo.currentIndexChanged.connect(self._run_selected_report)
+
+        self._report_summary_label = QLabel("")
+        layout.addWidget(self._report_summary_label)
+
+        self._report_table = QTableWidget()
+        self._report_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._report_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._report_table.setSortingEnabled(True)
+        self._report_table.cellDoubleClicked.connect(
+            self._on_report_row_double_clicked
+        )
+        layout.addWidget(self._report_table)
+
+        return widget
+
+    def _current_report_definition(self) -> ReportDefinition | None:
+        method_name = self._report_combo.currentData()
+        if not method_name:
+            return None
+        return next(
+            (d for d in REPORT_DEFINITIONS if d.method_name == method_name),
+            None,
+        )
+
+    def _run_selected_report(self) -> None:
+        if not self.context.started:
+            return
+
+        definition = self._current_report_definition()
+        if definition is None:
+            return
+
+        reports = ReportService(self.context)
+        method = getattr(reports, definition.method_name)
+        raw_result = method()
+
+        rows, columns = self._flatten_report_result(definition, raw_result)
+
+        self._report_table.setSortingEnabled(False)
+        self._report_table.setColumnCount(len(columns))
+        self._report_table.setHorizontalHeaderLabels(columns)
+        self._report_table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            for col_idx, col_name in enumerate(columns):
+                value = row.get(col_name)
+                item = TableItem("" if value is None else str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._report_table.setItem(row_idx, col_idx, item)
+        self._report_table.resizeColumnsToContents()
+        self._report_table.setSortingEnabled(True)
+
+        self._report_summary_label.setText(f"{len(rows)} row(s)")
+
+    def _on_report_row_double_clicked(self, row: int, _column: int) -> None:
+        definition = self._current_report_definition()
+        if definition is None:
+            return
+        self._navigate_to_record(
+            definition.target_table, definition.target_pk, self._report_table, row
+        )
+
+    @staticmethod
+    def _flatten_report_result(
+        definition: ReportDefinition, raw_result: Any
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """
+        Convert a ReportService result into a uniform (rows, columns)
+        shape ready for generic table display. Most reports already
+        return list[dict] as-is; duplicate_artists (groups of rows)
+        and songs_sung_by_many_artists (rows with a nested artist
+        list) need flattening first.
+        """
+
+        if definition.method_name == "duplicate_artists":
+            rows: list[dict[str, Any]] = []
+            for group_index, group in enumerate(raw_result, start=1):
+                for artist in group:
+                    rows.append(
+                        {
+                            "Group": group_index,
+                            "ArtistID": artist["ArtistID"],
+                            "Name": artist["Name"],
+                            "Surname": artist["Surname"],
+                        }
+                    )
+            return rows, ["Group", "ArtistID", "Name", "Surname"]
+
+        if definition.method_name == "songs_sung_by_many_artists":
+            rows = []
+            for song in raw_result:
+                artist_names = ", ".join(
+                    f"{artist['Name']} {artist['Surname']}".strip()
+                    if artist["Name"]
+                    else str(artist["Surname"])
+                    for artist in song["artists"]
+                )
+                rows.append(
+                    {
+                        "SongID": song["SongID"],
+                        "Title": song["Title"],
+                        "BPM": song["BPM"],
+                        "Year": song["Year"],
+                        "Artists": artist_names,
+                    }
+                )
+            return rows, ["SongID", "Title", "BPM", "Year", "Artists"]
+
+        if not raw_result:
+            return [], []
+
+        columns = list(raw_result[0].keys())
+        return raw_result, columns
 
     def _direct_cell_links(self) -> dict[str, str]:
         """
