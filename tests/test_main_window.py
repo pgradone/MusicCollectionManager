@@ -31,8 +31,9 @@ from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QListWidget, QTa
 
 from core.relationship_operations import link, list_related, unlink
 from core.relationships import JUNCTION, discover_relationships
-from main import SOFT_FOREIGN_KEYS, MainWindow
+from main import REPORT_DEFINITIONS, SOFT_FOREIGN_KEYS, MainWindow
 from services.program_service import ProgramService
+from services.report_service import ReportService
 from services.song_service import SongService
 from core.repository import repository_for
 
@@ -709,3 +710,90 @@ def test_scheduled_programs_subform_shows_this_program(
         for entry in program_service.schedule_for_program(program_id):
             program_service.remove_song(program_id, entry["Position"])
         programs_repo.delete(program_id, commit=True)
+
+
+# ============================================================
+# Dashboard and Reports tabs (Milestone 5A (3/N))
+# ============================================================
+#
+# Read-only against the real database, like the other window-level
+# tests above - these verify the UI layer correctly reflects what
+# ReportService computes, not the computations themselves (already
+# covered by tests/test_report_service.py).
+
+
+def test_main_tabs_has_three_tabs(window: MainWindow) -> None:
+    assert window.main_tabs.count() == 3
+    assert [
+        window.main_tabs.tabText(i) for i in range(window.main_tabs.count())
+    ] == ["Browse", "Dashboard", "Reports"]
+
+
+def test_dashboard_matches_report_service(window: MainWindow) -> None:
+    window.main_tabs.setCurrentIndex(1)
+
+    reports = ReportService(window.context)
+    stats = reports.dashboard_stats()
+
+    assert str(stats.artist_count) in window._dashboard_labels["counts"].text()
+    assert str(stats.song_count) in window._dashboard_labels["counts"].text()
+    assert (
+        window._dashboard_recent_table.rowCount()
+        == len(stats.recently_added_programs)
+    )
+
+
+def test_dashboard_refreshes_on_tab_switch(window: MainWindow) -> None:
+    assert window._dashboard_recent_table.rowCount() == 0
+
+    window.main_tabs.setCurrentIndex(1)
+
+    assert window._dashboard_recent_table.rowCount() > 0
+
+
+@pytest.mark.parametrize(
+    "definition_index", range(len(REPORT_DEFINITIONS))
+)
+def test_report_row_count_matches_report_service(
+    window: MainWindow, definition_index: int
+) -> None:
+    definition = REPORT_DEFINITIONS[definition_index]
+    reports = ReportService(window.context)
+
+    window.main_tabs.setCurrentIndex(2)
+    window._report_combo.setCurrentIndex(definition_index)
+
+    raw = getattr(reports, definition.method_name)()
+    if definition.method_name == "duplicate_artists":
+        expected_rows = sum(len(group) for group in raw)
+    else:
+        expected_rows = len(raw)
+
+    assert window._report_table.rowCount() == expected_rows
+
+
+def test_reports_refreshes_on_tab_switch(window: MainWindow) -> None:
+    assert window._report_table.rowCount() == 0
+
+    window.main_tabs.setCurrentIndex(2)
+
+    assert window._report_table.rowCount() > 0
+
+
+def test_report_double_click_navigates_to_browse_tab(
+    window: MainWindow,
+) -> None:
+    window.main_tabs.setCurrentIndex(2)
+    window._report_combo.setCurrentIndex(0)  # Songs without an Artist
+
+    assert window._report_table.rowCount() > 0
+    item = window._report_table.item(0, 0)
+    assert item is not None
+    song_id = int(item.text())
+
+    window._on_report_row_double_clicked(0, 0)
+
+    assert window.main_tabs.currentIndex() == 0
+    assert window.current_table == "Songs"
+    assert window.current_row is not None
+    assert window.current_row["SongID"] == song_id
