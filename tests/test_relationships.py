@@ -222,3 +222,71 @@ def test_artists_reverse_direct_to_records_with_soft_fk(
     assert len(matches) == 1
     assert matches[0].fk_column == "ArtistID"
     assert matches[0].fk_table == "Records"
+
+# ============================================================
+# numeric_extra_columns (junction) / order_column (reverse_direct)
+# ============================================================
+
+
+def test_contain_position_is_not_numeric(
+    context: DatabaseContext,
+) -> None:
+    relationships = discover_relationships(context, "Records")
+
+    contain = next(
+        r
+        for r in relationships
+        if r.kind == JUNCTION and r.target_table == "Songs"
+    )
+
+    assert contain.extra_columns == ("Position",)
+    assert contain.numeric_extra_columns == ()
+
+
+def test_programs_schedule_has_order_column(
+    context: DatabaseContext,
+) -> None:
+    soft_fk = SoftForeignKey(
+        table="Schedule",
+        column="SongID",
+        referenced_table="Songs",
+        referenced_column="SongID",
+    )
+
+    relationships = discover_relationships(
+        context, "Programs", soft_foreign_keys=[soft_fk]
+    )
+
+    schedule = next(
+        r
+        for r in relationships
+        if r.kind == REVERSE_DIRECT and r.target_table == "Schedule"
+    )
+
+    assert schedule.order_column == "Position"
+
+
+def test_records_reverse_direct_has_no_order_column(
+    context: DatabaseContext,
+) -> None:
+    soft_fk = SoftForeignKey(
+        table="Records",
+        column="ArtistID",
+        referenced_table="Artists",
+        referenced_column="ArtistID",
+    )
+
+    relationships = discover_relationships(
+        context, "Artists", soft_foreign_keys=[soft_fk]
+    )
+
+    records = next(
+        r
+        for r in relationships
+        if r.kind == REVERSE_DIRECT and r.target_table == "Records"
+    )
+
+    # Records' primary key is just RecordID - a single column, not
+    # (ArtistID, <something numeric>) - so this must not be flagged
+    # as an ordered child table.
+    assert records.order_column is None

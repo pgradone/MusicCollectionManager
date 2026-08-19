@@ -311,6 +311,47 @@ class ProgramService(Service):
             self._schedule.delete(old_key, commit=False)
             self._schedule.insert(moved, commit=False)
 
+    def swap_positions(
+        self,
+        program_id: int,
+        position_a: float,
+        position_b: float,
+    ) -> None:
+        """
+        Swap the two schedule slots at position_a and position_b,
+        exchanging their SongID/Song_Artist/Record/BPM/Year along
+        with them.
+
+        Unlike move_song(), this never raises "position already
+        scheduled" for the target position, since both positions
+        are already occupied by the two rows being exchanged - that
+        is the whole point of a swap. Both deletes and both inserts
+        happen in a single transaction.
+        """
+
+        self.require(program_id)
+
+        if position_a == position_b:
+            return
+
+        key_a = {"ProgramID": program_id, "Position": position_a}
+        key_b = {"ProgramID": program_id, "Position": position_b}
+
+        entry_a = self._schedule.require(key_a)
+        entry_b = self._schedule.require(key_b)
+
+        payload_a = dict(entry_a)
+        payload_a["Position"] = position_b
+
+        payload_b = dict(entry_b)
+        payload_b["Position"] = position_a
+
+        with self.context.database.transaction():
+            self._schedule.delete(key_a, commit=False)
+            self._schedule.delete(key_b, commit=False)
+            self._schedule.insert(payload_a, commit=False)
+            self._schedule.insert(payload_b, commit=False)
+
     # ========================================================
     # Internal helpers
     # ========================================================

@@ -1021,7 +1021,12 @@ class MainWindow(QMainWindow):
 
         target_columns = [c["name"] for c in self.db.columns(target_table)]
         junction_extra_cols = list(relationship.extra_columns)
-        has_position = "Position" in junction_extra_cols
+        # Only a genuinely numeric extra column (confirmed from the
+        # schema, not just named "Position") gets swap/renumber
+        # controls. A text column like Contain.Position (vinyl-side
+        # labels such as "A1") is free text a user edits directly -
+        # numeric reordering buttons would be meaningless for it.
+        has_position = "Position" in relationship.numeric_extra_columns
 
         display_columns = junction_extra_cols + target_columns
 
@@ -1043,11 +1048,13 @@ class MainWindow(QMainWindow):
             )
 
         table.setRowCount(len(related_rows))
+        table.blockSignals(True)
         for row_idx, row in enumerate(related_rows):
             other_value = row.get(target_pk)
             for col_idx, col_name in enumerate(display_columns):
                 value = row.get(col_name)
-                if col_name == "Position" and value is not None:
+                is_numeric_extra = col_name in relationship.numeric_extra_columns
+                if is_numeric_extra and value is not None:
                     try:
                         pos_int = int(value)
                     except (ValueError, TypeError):
@@ -1057,19 +1064,25 @@ class MainWindow(QMainWindow):
                         spin.setRange(1, 99)
                         spin.setValue(pos_int)
                         spin.valueChanged.connect(
-                            lambda v, ov=other_value, rel=relationship, pv=primary_value:
-                            self._set_junction_field(rel, pv, ov, "Position", v)
+                            lambda v, ov=other_value, rel=relationship, pv=primary_value, cn=col_name:
+                            self._set_junction_field(rel, pv, ov, cn, v)
                         )
                         table.setCellWidget(row_idx, col_idx, spin)
-                    else:
-                        item = TableItem(str(value))
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                        table.setItem(row_idx, col_idx, item)
+                        continue
+                item = TableItem("" if value is None else str(value))
+                if col_name in junction_extra_cols:
+                    # A free-text extra column (e.g. Contain.Position)
+                    # is directly editable - saved on edit below.
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
                 else:
-                    item = TableItem("" if value is None else str(value))
-                    if col_name not in junction_extra_cols:
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    table.setItem(row_idx, col_idx, item)
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_idx, col_idx, item)
+        table.blockSignals(False)
+
+        table.itemChanged.connect(
+            lambda item, rel=relationship, pv=primary_value, dc=display_columns, tpk=target_pk:
+            self._on_junction_extra_cell_edited(rel, pv, dc, tpk, table, item)
+        )
 
         table.resizeColumnsToContents()
         table.setSortingEnabled(True)
@@ -1110,6 +1123,37 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_layout)
         return widget
+
+    def _on_junction_extra_cell_edited(
+        self,
+        relationship: Relationship,
+        primary_value: Any,
+        display_columns: list[str],
+        target_pk: str,
+        table_widget: QTableWidget,
+        item: QTableWidgetItem,
+    ) -> None:
+        col_name = display_columns[item.column()]
+
+        if (
+            col_name not in relationship.extra_columns
+            or col_name in relationship.numeric_extra_columns
+        ):
+            return  # Not a free-text extra column - nothing to save.
+
+        pk_col_idx = display_columns.index(target_pk)
+        pk_item = table_widget.item(item.row(), pk_col_idx)
+        if pk_item is None or not pk_item.text():
+            return
+
+        try:
+            other_value = int(pk_item.text())
+        except ValueError:
+            other_value = pk_item.text()
+
+        self._set_junction_field(
+            relationship, primary_value, other_value, col_name, item.text()
+        )
 
     def _build_schedule_subform(self, program_id: Any) -> QWidget:
         columns = ["Position", "SongID", "Song_Artist", "Record", "BPM", "Year"]
@@ -1159,11 +1203,17 @@ class MainWindow(QMainWindow):
         btn_layout = QHBoxLayout()
         add_btn = QPushButton("Add Song")
         del_btn = QPushButton("Remove")
+        up_btn = QPushButton("Move Up")
+        down_btn = QPushButton("Move Down")
 
         add_btn.clicked.connect(lambda: self._add_schedule_song(program_id, table))
         del_btn.clicked.connect(lambda: self._delete_schedule_entry(program_id, table))
+        up_btn.clicked.connect(lambda: self._swap_schedule_position(program_id, table, -1))
+        down_btn.clicked.connect(lambda: self._swap_schedule_position(program_id, table, 1))
         btn_layout.addWidget(add_btn)
         btn_layout.addWidget(del_btn)
+        btn_layout.addWidget(up_btn)
+        btn_layout.addWidget(down_btn)
         layout.addLayout(btn_layout)
 
         return widget
@@ -1292,6 +1342,41 @@ class MainWindow(QMainWindow):
             programs.move_song(program_id, current_position, float(new_pos))
         except (ProgramValidationError, RecordNotFoundError, DatabaseError) as exc:
             logger.warning("Could not update schedule position: %s", exc)
+
+    def _swap_schedule_position(
+        self, program_id: Any, table_widget: QTableWidget, direction: int,
+    ) -> None:
+        selected_rows = table_widget.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "Move", "Select a row first.")
+            return
+
+        row = selected_rows[0].row()
+        target_row = row + direction
+        if target_row < 0 or target_row >= table_widget.rowCount():
+            return
+
+        pos_widget = table_widget.cellWidget(row, 0)
+        target_pos_widget = table_widget.cellWidget(target_row, 0)
+        if not isinstance(pos_widget, QSpinBox) or not isinstance(
+            target_pos_widget, QSpinBox
+        ):
+            return
+
+        # Read live .value() rather than a value captured at table-
+        # build time, so this stays correct even if the user just
+        # nudged one of the spinboxes directly beforehand.
+        position = float(pos_widget.value())
+        target_position = float(target_pos_widget.value())
+
+        programs = ProgramService(self.context)
+        try:
+            programs.swap_positions(program_id, position, target_position)
+        except (ProgramValidationError, RecordNotFoundError, DatabaseError) as exc:
+            logger.warning("Could not swap schedule positions: %s", exc)
+            return
+
+        self.load_table_data(self.current_table)
 
     def _set_junction_field(
         self, relationship: Relationship, primary_value: Any,

@@ -78,6 +78,22 @@ class Relationship:
         "reverse_direct"  - the reverse of "direct": some other
                              table (fk_table) holds a foreign key
                              pointing back at this table.
+
+    numeric_extra_columns ("junction" only):
+        The subset of extra_columns whose declared SQL type has
+        numeric affinity (INTEGER/REAL/NUMERIC). Distinguishes a
+        genuinely orderable numeric column (safe for swap/renumber
+        UI) from a free-text one like Contain.Position, which holds
+        vinyl-side labels such as "A1" and must never be treated as
+        a number.
+
+    order_column ("reverse_direct" only):
+        Set when the owning table (fk_table) is shaped like an
+        ordered child row: its primary key is exactly
+        {fk_column, one other numeric column} - e.g. Schedule's
+        PK is (ProgramID, Position). None for a plain reverse_direct
+        relationship like Artists <- Records.ArtistID, where
+        Records' primary key is just RecordID.
     """
 
     kind: RelationshipKind
@@ -89,10 +105,14 @@ class Relationship:
     own_fk_column: str | None = None
     other_fk_column: str | None = None
     extra_columns: tuple[str, ...] = ()
+    numeric_extra_columns: tuple[str, ...] = ()
 
     # "direct" / "reverse_direct" only
     fk_column: str | None = None
     fk_table: str | None = None
+
+    # "reverse_direct" only - see _numeric_order_column()
+    order_column: str | None = None
 
 
 # A foreign key, declared or soft, reduced to the three things
@@ -224,6 +244,12 @@ def _junction_relationships(
             for column in junction.columns
             if column.name not in key_columns
         )
+        numeric_extra_columns = tuple(
+            column.name
+            for column in junction.columns
+            if column.name in extra_columns
+            and _has_numeric_affinity(column.data_type)
+        )
 
         relationships.append(
             Relationship(
@@ -234,6 +260,7 @@ def _junction_relationships(
                 own_fk_column=own_fk[0],
                 other_fk_column=other_fk[0],
                 extra_columns=extra_columns,
+                numeric_extra_columns=numeric_extra_columns,
             )
         )
 
@@ -289,6 +316,12 @@ def _reverse_direct_relationships(
         ):
             continue
 
+        order_column = (
+            _numeric_order_column(owning_table, fk_column)
+            if owning_table is not None
+            else None
+        )
+
         relationships.append(
             Relationship(
                 kind=REVERSE_DIRECT,
@@ -296,7 +329,65 @@ def _reverse_direct_relationships(
                 target_table=owning_table_name,
                 fk_column=fk_column,
                 fk_table=owning_table_name,
+                order_column=order_column,
             )
         )
 
     return relationships
+
+
+def _has_numeric_affinity(data_type: str) -> bool:
+    """
+    Approximate SQLite's own type-affinity rules for the subset
+    that matters here: does this declared column type behave as a
+    number (INTEGER/REAL affinity) rather than TEXT?
+    """
+
+    upper = data_type.upper()
+
+    return any(
+        token in upper
+        for token in ("INT", "REAL", "DOUB", "FLOA", "NUM", "DEC")
+    )
+
+
+def _numeric_order_column(
+    table: TableInfo,
+    fk_column: str,
+) -> str | None:
+    """
+    If `table`'s primary key is exactly {fk_column, one other
+    numeric column}, and that other column is not itself part of a
+    foreign key, return its name.
+
+    This identifies tables shaped like Schedule (PK: ProgramID,
+    Position): a child row whose place in its parent's ordering is
+    baked into the row's own identity, rather than living in a
+    separate non-key column the way Contain.Position does. It is a
+    heuristic, not a certainty - an unrelated table that happens to
+    have a two-column (FK, INTEGER) primary key for other reasons
+    would also match. It correctly identifies Schedule and nothing
+    else in this database's current schema.
+    """
+
+    pk_columns = table.primary_key_columns
+
+    if len(pk_columns) != 2:
+        return None
+
+    other_columns = [
+        column for column in pk_columns if column.name != fk_column
+    ]
+
+    if len(other_columns) != 1:
+        return None
+
+    candidate = other_columns[0]
+
+    if candidate.name in {fk.column for fk in table.foreign_keys}:
+        return None
+
+    if not _has_numeric_affinity(candidate.data_type):
+        return None
+
+    return candidate.name

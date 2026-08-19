@@ -1150,3 +1150,111 @@ def test_programs_scheduling_song_reflects_schedule(
         programs.remove_song(program_id, 1.0)
         programs.delete(program_id)
         songs.delete(song_id)
+
+
+# ============================================================
+# ProgramService: swap_positions
+# ============================================================
+
+
+def test_swap_positions_exchanges_two_slots(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    song_a, song_b = songs_repo.all(limit=2)
+
+    program_id = programs.create(prog_name="SwapPositionsTest")
+
+    try:
+        programs.add_song(program_id, 1.0, song_id=song_a["SongID"])
+        programs.add_song(program_id, 2.0, song_id=song_b["SongID"])
+
+        programs.swap_positions(program_id, 1.0, 2.0)
+
+        schedule = {
+            entry["SongID"]: entry["Position"]
+            for entry in programs.schedule_for_program(program_id)
+        }
+        assert schedule[song_a["SongID"]] == 2.0
+        assert schedule[song_b["SongID"]] == 1.0
+    finally:
+        for entry in programs.schedule_for_program(program_id):
+            programs.remove_song(program_id, entry["Position"])
+        programs.delete(program_id)
+
+
+def test_swap_positions_preserves_other_fields(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    song_a, song_b = songs_repo.all(limit=2)
+
+    program_id = programs.create(prog_name="SwapPositionsFieldsTest")
+
+    try:
+        programs.add_song(
+            program_id, 1.0, song_id=song_a["SongID"],
+            song_artist="Song A * Artist A",
+        )
+        programs.add_song(
+            program_id, 2.0, song_id=song_b["SongID"],
+            song_artist="Song B * Artist B",
+        )
+
+        programs.swap_positions(program_id, 1.0, 2.0)
+
+        by_song = {
+            entry["SongID"]: entry
+            for entry in programs.schedule_for_program(program_id)
+        }
+        assert by_song[song_a["SongID"]]["Song_Artist"] == "Song A * Artist A"
+        assert by_song[song_a["SongID"]]["Position"] == 2.0
+        assert by_song[song_b["SongID"]]["Song_Artist"] == "Song B * Artist B"
+        assert by_song[song_b["SongID"]]["Position"] == 1.0
+    finally:
+        for entry in programs.schedule_for_program(program_id):
+            programs.remove_song(program_id, entry["Position"])
+        programs.delete(program_id)
+
+
+def test_swap_positions_same_position_is_a_no_op(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    program_id = programs.create(prog_name="SwapNoOpTest")
+
+    try:
+        programs.add_song(program_id, 1.0, song_id=existing_song["SongID"])
+
+        programs.swap_positions(program_id, 1.0, 1.0)
+
+        schedule = programs.schedule_for_program(program_id)
+        assert len(schedule) == 1
+        assert schedule[0]["Position"] == 1.0
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)
+
+
+def test_swap_positions_unknown_position_raises_not_found(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    songs_repo = repository_for(context, "Songs")
+    existing_song = songs_repo.all(limit=1)[0]
+
+    program_id = programs.create(prog_name="SwapUnknownPositionTest")
+
+    try:
+        programs.add_song(program_id, 1.0, song_id=existing_song["SongID"])
+
+        with pytest.raises(RecordNotFoundError):
+            programs.swap_positions(program_id, 1.0, 999.0)
+    finally:
+        programs.remove_song(program_id, 1.0)
+        programs.delete(program_id)

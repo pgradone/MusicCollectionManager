@@ -27,7 +27,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QListWidget, QTableWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QTableWidget,
+)
 
 from core.relationship_operations import link, list_related, unlink
 from core.relationships import JUNCTION, discover_relationships
@@ -283,22 +291,69 @@ def test_delete_junction_relation_removes_link(
         artists.delete(artist_id, commit=True)
 
 
-def test_swap_junction_position_exchanges_positions(
+def test_contain_has_no_swap_or_renumber_controls(
     crud_window: MainWindow,
 ) -> None:
+    """
+    Contain.Position is free text (vinyl-side labels like "A1"), not
+    a number - the generic subform must not offer numeric-only Move
+    Up/Down/Renumber controls for it, since blindly swapping such
+    values would silently corrupt them.
+    """
+
     records = repository_for(crud_window.context, "Records")
     songs = repository_for(crud_window.context, "Songs")
-    song_a, song_b = songs.all(limit=2)
+    existing_song = songs.all(limit=1)[0]
 
-    record_id = records.insert({"Title": "SwapViaUI"}, commit=True)
+    record_id = records.insert({"Title": "NoSwapButtonsUITest"}, commit=True)
     relationship = _contain_relationship(crud_window)
     link(
-        crud_window.context, relationship, record_id, song_a["SongID"],
-        extra_values={"Position": "1"},
+        crud_window.context, relationship, record_id, existing_song["SongID"],
+        extra_values={"Position": "A1"},
     )
+
+    try:
+        crud_window.load_table_data("Records")
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["RecordID"] == record_id
+        )
+        crud_window.table_widget.selectRow(row_idx)
+
+        tab_widget = crud_window.related_tabs.widget(0)
+        assert tab_widget is not None
+        buttons = {
+            b.text() for b in tab_widget.findChildren(QPushButton)
+        }
+        assert "Move Up" not in buttons
+        assert "Move Down" not in buttons
+        assert "Renumber" not in buttons
+        assert "Add" in buttons
+        assert "Remove" in buttons
+    finally:
+        unlink(crud_window.context, relationship, record_id, existing_song["SongID"])
+        records.delete(record_id, commit=True)
+
+
+def test_contain_position_cell_is_directly_editable(
+    crud_window: MainWindow,
+) -> None:
+    """
+    Since Position is free text, a user must be able to type
+    directly into the cell - editing it should save through
+    _set_junction_field the same way the old numeric spinbox did.
+    """
+
+    records = repository_for(crud_window.context, "Records")
+    songs = repository_for(crud_window.context, "Songs")
+    existing_song = songs.all(limit=1)[0]
+
+    record_id = records.insert({"Title": "EditPositionUITest"}, commit=True)
+    relationship = _contain_relationship(crud_window)
     link(
-        crud_window.context, relationship, record_id, song_b["SongID"],
-        extra_values={"Position": "2"},
+        crud_window.context, relationship, record_id, existing_song["SongID"],
+        extra_values={"Position": "A1"},
     )
 
     try:
@@ -314,49 +369,85 @@ def test_swap_junction_position_exchanges_positions(
         assert tab_widget is not None
         table_widget = tab_widget.findChild(QTableWidget)
         assert table_widget is not None
-        table_widget.selectRow(0)  # song_a, currently Position "1"
 
-        crud_window._swap_junction_position(
-            relationship, record_id, table_widget, 1
-        )
+        position_col = 0  # "Position" is the sole extra column, first
+        item = table_widget.item(0, position_col)
+        assert item is not None
+        assert bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
+
+        item.setText("B7")  # simulates the user typing a new label
 
         positions = {
-            row["SongID"]: str(row["Position"])
+            row["SongID"]: row["Position"]
             for row in list_related(crud_window.context, relationship, record_id)
         }
-        assert positions[song_a["SongID"]] == "2"
-        assert positions[song_b["SongID"]] == "1"
+        assert positions[existing_song["SongID"]] == "B7"
     finally:
-        unlink(crud_window.context, relationship, record_id, song_a["SongID"])
-        unlink(crud_window.context, relationship, record_id, song_b["SongID"])
+        unlink(crud_window.context, relationship, record_id, existing_song["SongID"])
         records.delete(record_id, commit=True)
 
 
-def test_renumber_junction_positions_assigns_sequential_values(
+def test_schedule_has_move_up_and_move_down_controls(
     crud_window: MainWindow,
 ) -> None:
-    records = repository_for(crud_window.context, "Records")
-    songs = repository_for(crud_window.context, "Songs")
-    song_a, song_b = songs.all(limit=2)
+    """
+    Schedule.Position is a genuine integer and part of the primary
+    key - unlike Contain, it should have real Move Up/Down controls.
+    """
 
-    record_id = records.insert({"Title": "RenumberViaUI"}, commit=True)
-    relationship = _contain_relationship(crud_window)
-    # Deliberately non-sequential, unsorted-looking starting positions.
-    link(
-        crud_window.context, relationship, record_id, song_a["SongID"],
-        extra_values={"Position": "5"},
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs = repository_for(crud_window.context, "Songs")
+    existing_song = songs.all(limit=1)[0]
+    program_id = programs_repo.insert(
+        {"ProgName": "MoveButtonsUITest"}, commit=True
     )
-    link(
-        crud_window.context, relationship, record_id, song_b["SongID"],
-        extra_values={"Position": "10"},
-    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(program_id, 1.0, song_id=existing_song["SongID"])
 
     try:
-        crud_window.load_table_data("Records")
+        idx = crud_window.table_combo.findText("Programs")
+        crud_window.table_combo.setCurrentIndex(idx)
         row_idx = next(
             r
             for r in range(len(crud_window.table_rows))
-            if crud_window.table_rows[r]["RecordID"] == record_id
+            if crud_window.table_rows[r]["ProgramID"] == program_id
+        )
+        crud_window.table_widget.selectRow(row_idx)
+
+        tab_widget = crud_window.related_tabs.widget(0)
+        assert tab_widget is not None
+        buttons = {
+            b.text() for b in tab_widget.findChildren(QPushButton)
+        }
+        assert "Move Up" in buttons
+        assert "Move Down" in buttons
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_swap_schedule_position_exchanges_positions(
+    crud_window: MainWindow,
+) -> None:
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs = repository_for(crud_window.context, "Songs")
+    song_a, song_b = songs.all(limit=2)
+
+    program_id = programs_repo.insert(
+        {"ProgName": "SwapScheduleUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(program_id, 1.0, song_id=song_a["SongID"])
+    program_service.add_song(program_id, 2.0, song_id=song_b["SongID"])
+
+    try:
+        idx = crud_window.table_combo.findText("Programs")
+        crud_window.table_combo.setCurrentIndex(idx)
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["ProgramID"] == program_id
         )
         crud_window.table_widget.selectRow(row_idx)
 
@@ -364,20 +455,20 @@ def test_renumber_junction_positions_assigns_sequential_values(
         assert tab_widget is not None
         table_widget = tab_widget.findChild(QTableWidget)
         assert table_widget is not None
+        table_widget.selectRow(0)  # song_a, currently Position 1
 
-        crud_window._renumber_junction_positions(
-            relationship, record_id, table_widget
-        )
+        crud_window._swap_schedule_position(program_id, table_widget, 1)
 
         positions = {
-            row["SongID"]: str(row["Position"])
-            for row in list_related(crud_window.context, relationship, record_id)
+            entry["SongID"]: entry["Position"]
+            for entry in program_service.schedule_for_program(program_id)
         }
-        assert sorted(positions.values()) == ["1", "2"]
+        assert positions[song_a["SongID"]] == 2.0
+        assert positions[song_b["SongID"]] == 1.0
     finally:
-        unlink(crud_window.context, relationship, record_id, song_a["SongID"])
-        unlink(crud_window.context, relationship, record_id, song_b["SongID"])
-        records.delete(record_id, commit=True)
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
 
 
 # ============================================================
