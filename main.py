@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTableWidgetSelectionRange,
     QVBoxLayout,
     QWidget,
 )
@@ -193,6 +194,12 @@ class MainWindow(QMainWindow):
 
         self.db = DatabaseManager()
         self.context = DatabaseContext(self.db)
+        # Set by _move_selected_schedule_rows() right before a reload,
+        # so _build_schedule_subform() can restore the same selection
+        # (at its new positions) once the table is rebuilt - without
+        # this, every Move Up/Down click would drop the selection and
+        # force the user to re-select before clicking again.
+        self._pending_schedule_reselect: tuple[Any, set[Any]] | None = None
         self.current_table = ""
         self.current_row: dict[str, Any] | None = None
         self.column_names: list[str] = []
@@ -1165,12 +1172,16 @@ class MainWindow(QMainWindow):
         table = QTableWidget()
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
 
         programs = ProgramService(self.context)
         rows = programs.schedule_for_program(program_id)
 
         table.setRowCount(len(rows))
+        song_id_by_row: dict[int, Any] = {}
         for row_idx, row in enumerate(rows):
+            song_id_by_row[row_idx] = row["SongID"]
             pos = row["Position"]
             if pos is not None:
                 spin = QSpinBox()
@@ -1200,6 +1211,14 @@ class MainWindow(QMainWindow):
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(table)
 
+        if (
+            self._pending_schedule_reselect is not None
+            and self._pending_schedule_reselect[0] == program_id
+        ):
+            self._restore_schedule_selection(
+                table, song_id_by_row, self._pending_schedule_reselect[1]
+            )
+
         btn_layout = QHBoxLayout()
         add_btn = QPushButton("Add Song")
         del_btn = QPushButton("Remove")
@@ -1208,8 +1227,12 @@ class MainWindow(QMainWindow):
 
         add_btn.clicked.connect(lambda: self._add_schedule_song(program_id, table))
         del_btn.clicked.connect(lambda: self._delete_schedule_entry(program_id, table))
-        up_btn.clicked.connect(lambda: self._swap_schedule_position(program_id, table, -1))
-        down_btn.clicked.connect(lambda: self._swap_schedule_position(program_id, table, 1))
+        up_btn.clicked.connect(
+            lambda: self._move_selected_schedule_rows(program_id, table, -1)
+        )
+        down_btn.clicked.connect(
+            lambda: self._move_selected_schedule_rows(program_id, table, 1)
+        )
         btn_layout.addWidget(add_btn)
         btn_layout.addWidget(del_btn)
         btn_layout.addWidget(up_btn)
@@ -1343,40 +1366,88 @@ class MainWindow(QMainWindow):
         except (ProgramValidationError, RecordNotFoundError, DatabaseError) as exc:
             logger.warning("Could not update schedule position: %s", exc)
 
-    def _swap_schedule_position(
+    def _move_selected_schedule_rows(
         self, program_id: Any, table_widget: QTableWidget, direction: int,
     ) -> None:
-        selected_rows = table_widget.selectionModel().selectedRows()
+        selected_rows = sorted(
+            index.row()
+            for index in table_widget.selectionModel().selectedRows()
+        )
         if not selected_rows:
-            QMessageBox.information(self, "Move", "Select a row first.")
+            QMessageBox.information(self, "Move", "Select one or more rows first.")
             return
 
-        row = selected_rows[0].row()
-        target_row = row + direction
-        if target_row < 0 or target_row >= table_widget.rowCount():
-            return
+        positions: list[float] = []
+        song_ids: set[Any] = set()
+        for row in selected_rows:
+            pos_widget = table_widget.cellWidget(row, 0)
+            if not isinstance(pos_widget, QSpinBox):
+                continue
+            # Read live .value() rather than a value captured at
+            # table-build time, so this stays correct even if the
+            # user just nudged a spinbox directly beforehand.
+            positions.append(float(pos_widget.value()))
+            song_id_item = table_widget.item(row, 1)  # "SongID" column
+            if song_id_item is not None and song_id_item.text():
+                song_ids.add(song_id_item.text())
 
-        pos_widget = table_widget.cellWidget(row, 0)
-        target_pos_widget = table_widget.cellWidget(target_row, 0)
-        if not isinstance(pos_widget, QSpinBox) or not isinstance(
-            target_pos_widget, QSpinBox
-        ):
+        if not positions:
             return
-
-        # Read live .value() rather than a value captured at table-
-        # build time, so this stays correct even if the user just
-        # nudged one of the spinboxes directly beforehand.
-        position = float(pos_widget.value())
-        target_position = float(target_pos_widget.value())
 
         programs = ProgramService(self.context)
         try:
-            programs.swap_positions(program_id, position, target_position)
+            programs.move_selected(program_id, positions, direction)
         except (ProgramValidationError, RecordNotFoundError, DatabaseError) as exc:
-            logger.warning("Could not swap schedule positions: %s", exc)
+            logger.warning("Could not move schedule rows: %s", exc)
             return
 
+        # Set before reload so _build_schedule_subform() can restore
+        # it - not cleared there, since load_table_data() ends up
+        # rebuilding this tab more than once per call (via its own
+        # row re-selection), and each rebuild must still reapply the
+        # same pending selection. Cleared here instead, once the
+        # whole reload cycle has settled.
+        self._pending_schedule_reselect = (program_id, song_ids)
         self.load_table_data(self.current_table)
+        self._pending_schedule_reselect = None
+
+    @staticmethod
+    def _restore_schedule_selection(
+        table_widget: QTableWidget,
+        song_id_by_row: dict[int, Any],
+        song_ids_to_select: set[Any],
+    ) -> None:
+        matching_rows = sorted(
+            row
+            for row, song_id in song_id_by_row.items()
+            if str(song_id) in song_ids_to_select
+        )
+        if not matching_rows:
+            return
+
+        # The selection may itself be non-adjacent again (e.g. two
+        # separate blocks that were both moved) - select each
+        # contiguous run of matching rows as its own range.
+        run_start = matching_rows[0]
+        previous = matching_rows[0]
+        for row in matching_rows[1:]:
+            if row == previous + 1:
+                previous = row
+                continue
+            table_widget.setRangeSelected(
+                QTableWidgetSelectionRange(
+                    run_start, 0, previous, table_widget.columnCount() - 1
+                ),
+                True,
+            )
+            run_start = row
+            previous = row
+        table_widget.setRangeSelected(
+            QTableWidgetSelectionRange(
+                run_start, 0, previous, table_widget.columnCount() - 1
+            ),
+            True,
+        )
 
     def _set_junction_field(
         self, relationship: Relationship, primary_value: Any,

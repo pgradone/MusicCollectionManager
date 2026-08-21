@@ -311,46 +311,113 @@ class ProgramService(Service):
             self._schedule.delete(old_key, commit=False)
             self._schedule.insert(moved, commit=False)
 
-    def swap_positions(
+    def move_selected(
         self,
         program_id: int,
-        position_a: float,
-        position_b: float,
+        positions: list[float],
+        direction: int,
     ) -> None:
         """
-        Swap the two schedule slots at position_a and position_b,
-        exchanging their SongID/Song_Artist/Record/BPM/Year along
-        with them.
+        Move the schedule slots at `positions` up (direction=-1) or
+        down (direction=+1) by one step each. `positions` need not
+        be contiguous or already sorted.
 
-        Unlike move_song(), this never raises "position already
-        scheduled" for the target position, since both positions
-        are already occupied by the two rows being exchanged - that
-        is the whole point of a swap. Both deletes and both inserts
-        happen in a single transaction.
+        Any maximal run of adjacent selected slots moves together
+        as one block, exchanging places with the single slot
+        immediately outside it on the side being moved toward -
+        the same way most list editors move a multi-selection.
+        A run that is already at that end of the schedule is left
+        in place; every other run still moves. Everything is
+        computed from one consistent snapshot of the schedule, so
+        moving several disjoint selections at once can never
+        interfere with itself, and applied in a single transaction.
+
+        Example: schedule [A B C D E], selecting B and D and
+        pressing "up" moves B to swap with A and D to swap with C,
+        giving [B A D C E] - each selected slot swaps with its own
+        immediate neighbour, independently.
         """
 
         self.require(program_id)
 
-        if position_a == position_b:
+        if not positions:
             return
 
-        key_a = {"ProgramID": program_id, "Position": position_a}
-        key_b = {"ProgramID": program_id, "Position": position_b}
+        all_entries = self.schedule_for_program(program_id)
+        position_to_index = {
+            entry["Position"]: index
+            for index, entry in enumerate(all_entries)
+        }
 
-        entry_a = self._schedule.require(key_a)
-        entry_b = self._schedule.require(key_b)
+        selected_indices = sorted(
+            {
+                position_to_index[position]
+                for position in positions
+                if position in position_to_index
+            }
+        )
 
-        payload_a = dict(entry_a)
-        payload_a["Position"] = position_b
+        if not selected_indices:
+            return
 
-        payload_b = dict(entry_b)
-        payload_b["Position"] = position_a
+        runs: list[tuple[int, int]] = []
+        run_start = selected_indices[0]
+        previous = selected_indices[0]
+        for index in selected_indices[1:]:
+            if index == previous + 1:
+                previous = index
+            else:
+                runs.append((run_start, previous))
+                run_start = index
+                previous = index
+        runs.append((run_start, previous))
+
+        last_index = len(all_entries) - 1
+        new_position_by_index: dict[int, float] = {}
+
+        for start, end in runs:
+            if direction < 0:
+                if start == 0:
+                    continue
+                neighbour = start - 1
+                affected = [neighbour] + list(range(start, end + 1))
+            else:
+                if end == last_index:
+                    continue
+                neighbour = end + 1
+                affected = list(range(start, end + 1)) + [neighbour]
+
+            affected_positions = [
+                all_entries[index]["Position"] for index in affected
+            ]
+
+            if direction < 0:
+                rotated = [affected_positions[-1]] + affected_positions[:-1]
+            else:
+                rotated = affected_positions[1:] + affected_positions[:1]
+
+            for index, new_position in zip(affected, rotated):
+                new_position_by_index[index] = new_position
+
+        if not new_position_by_index:
+            return
+
+        keys = []
+        payloads = []
+        for index, new_position in new_position_by_index.items():
+            entry = all_entries[index]
+            keys.append(
+                {"ProgramID": program_id, "Position": entry["Position"]}
+            )
+            payload = dict(entry)
+            payload["Position"] = new_position
+            payloads.append(payload)
 
         with self.context.database.transaction():
-            self._schedule.delete(key_a, commit=False)
-            self._schedule.delete(key_b, commit=False)
-            self._schedule.insert(payload_a, commit=False)
-            self._schedule.insert(payload_b, commit=False)
+            for key in keys:
+                self._schedule.delete(key, commit=False)
+            for payload in payloads:
+                self._schedule.insert(payload, commit=False)
 
     # ========================================================
     # Internal helpers

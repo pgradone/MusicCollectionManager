@@ -1153,45 +1153,61 @@ def test_programs_scheduling_song_reflects_schedule(
 
 
 # ============================================================
-# ProgramService: swap_positions
+# ProgramService: move_selected
 # ============================================================
 
 
-def test_swap_positions_exchanges_two_slots(
+def _labelled_schedule_fixture(
+    programs: ProgramService,
+    context: DatabaseContext,
+    prog_name: str,
+) -> tuple[int, list[dict]]:
+    """
+    Create a program with 5 songs scheduled at positions 1..5 in
+    order, returning (program_id, songs) where songs[i] is at
+    position i + 1. Used to write move_selected assertions in terms
+    of readable A/B/C/D/E labels instead of raw IDs.
+    """
+
+    songs_repo = repository_for(context, "Songs")
+    songs = songs_repo.all(limit=5)
+    program_id = programs.create(prog_name=prog_name)
+
+    for index, song in enumerate(songs, start=1):
+        programs.add_song(program_id, float(index), song_id=song["SongID"])
+
+    return program_id, songs
+
+
+def _schedule_order(
+    programs: ProgramService, program_id: int, songs: list[dict]
+) -> list[str]:
+    """Return the current schedule as a list of 'A'..'E' labels, in Position order."""
+
+    schedule = programs.schedule_for_program(program_id)
+    song_id_to_label = {
+        song["SongID"]: chr(ord("A") + index)
+        for index, song in enumerate(songs)
+    }
+    return [song_id_to_label[entry["SongID"]] for entry in schedule]
+
+
+def _cleanup_schedule(
+    programs: ProgramService, program_id: int
+) -> None:
+    for entry in programs.schedule_for_program(program_id):
+        programs.remove_song(program_id, entry["Position"])
+    programs.delete(program_id)
+
+
+def test_move_selected_adjacent_pair_swaps_and_preserves_fields(
     programs: ProgramService,
     context: DatabaseContext,
 ) -> None:
     songs_repo = repository_for(context, "Songs")
     song_a, song_b = songs_repo.all(limit=2)
 
-    program_id = programs.create(prog_name="SwapPositionsTest")
-
-    try:
-        programs.add_song(program_id, 1.0, song_id=song_a["SongID"])
-        programs.add_song(program_id, 2.0, song_id=song_b["SongID"])
-
-        programs.swap_positions(program_id, 1.0, 2.0)
-
-        schedule = {
-            entry["SongID"]: entry["Position"]
-            for entry in programs.schedule_for_program(program_id)
-        }
-        assert schedule[song_a["SongID"]] == 2.0
-        assert schedule[song_b["SongID"]] == 1.0
-    finally:
-        for entry in programs.schedule_for_program(program_id):
-            programs.remove_song(program_id, entry["Position"])
-        programs.delete(program_id)
-
-
-def test_swap_positions_preserves_other_fields(
-    programs: ProgramService,
-    context: DatabaseContext,
-) -> None:
-    songs_repo = repository_for(context, "Songs")
-    song_a, song_b = songs_repo.all(limit=2)
-
-    program_id = programs.create(prog_name="SwapPositionsFieldsTest")
+    program_id = programs.create(prog_name="MoveSelectedPairTest")
 
     try:
         programs.add_song(
@@ -1203,58 +1219,140 @@ def test_swap_positions_preserves_other_fields(
             song_artist="Song B * Artist B",
         )
 
-        programs.swap_positions(program_id, 1.0, 2.0)
+        programs.move_selected(program_id, [1.0], -1)  # A can't move (top)
+        programs.move_selected(program_id, [2.0], -1)  # B swaps up with A
 
         by_song = {
             entry["SongID"]: entry
             for entry in programs.schedule_for_program(program_id)
         }
-        assert by_song[song_a["SongID"]]["Song_Artist"] == "Song A * Artist A"
         assert by_song[song_a["SongID"]]["Position"] == 2.0
-        assert by_song[song_b["SongID"]]["Song_Artist"] == "Song B * Artist B"
+        assert by_song[song_a["SongID"]]["Song_Artist"] == "Song A * Artist A"
         assert by_song[song_b["SongID"]]["Position"] == 1.0
+        assert by_song[song_b["SongID"]]["Song_Artist"] == "Song B * Artist B"
     finally:
-        for entry in programs.schedule_for_program(program_id):
-            programs.remove_song(program_id, entry["Position"])
-        programs.delete(program_id)
+        _cleanup_schedule(programs, program_id)
 
 
-def test_swap_positions_same_position_is_a_no_op(
+def test_move_selected_non_adjacent_rows_each_swap_independently(
     programs: ProgramService,
     context: DatabaseContext,
 ) -> None:
-    songs_repo = repository_for(context, "Songs")
-    existing_song = songs_repo.all(limit=1)[0]
-
-    program_id = programs.create(prog_name="SwapNoOpTest")
+    # [A B C D E], select B and D, move up -> [B A D C E] - each
+    # selected slot swaps with its own neighbour independently.
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedNonAdjacentTest"
+    )
 
     try:
-        programs.add_song(program_id, 1.0, song_id=existing_song["SongID"])
+        programs.move_selected(program_id, [2.0, 4.0], -1)
 
-        programs.swap_positions(program_id, 1.0, 1.0)
-
-        schedule = programs.schedule_for_program(program_id)
-        assert len(schedule) == 1
-        assert schedule[0]["Position"] == 1.0
+        assert _schedule_order(programs, program_id, songs) == list("BADCE")
     finally:
-        programs.remove_song(program_id, 1.0)
-        programs.delete(program_id)
+        _cleanup_schedule(programs, program_id)
 
 
-def test_swap_positions_unknown_position_raises_not_found(
+def test_move_selected_contiguous_block_moves_together(
     programs: ProgramService,
     context: DatabaseContext,
 ) -> None:
-    songs_repo = repository_for(context, "Songs")
-    existing_song = songs_repo.all(limit=1)[0]
-
-    program_id = programs.create(prog_name="SwapUnknownPositionTest")
+    # [A B C D E], select B,C (contiguous), move up -> [B C A D E].
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedBlockTest"
+    )
 
     try:
-        programs.add_song(program_id, 1.0, song_id=existing_song["SongID"])
+        programs.move_selected(program_id, [2.0, 3.0], -1)
 
-        with pytest.raises(RecordNotFoundError):
-            programs.swap_positions(program_id, 1.0, 999.0)
+        assert _schedule_order(programs, program_id, songs) == list("BCADE")
     finally:
-        programs.remove_song(program_id, 1.0)
-        programs.delete(program_id)
+        _cleanup_schedule(programs, program_id)
+
+
+def test_move_selected_boundary_run_is_skipped_others_still_move(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    # [A B C D E], select A (already at top) and D, move up ->
+    # A stays put, D still swaps with C -> [A B D C E].
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedBoundaryUpTest"
+    )
+
+    try:
+        programs.move_selected(program_id, [1.0, 4.0], -1)
+
+        assert _schedule_order(programs, program_id, songs) == list("ABDCE")
+    finally:
+        _cleanup_schedule(programs, program_id)
+
+
+def test_move_selected_boundary_run_down(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    # [A B C D E], select E (already at bottom) and B, move down ->
+    # E stays put, B still swaps with C -> [A C B D E].
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedBoundaryDownTest"
+    )
+
+    try:
+        programs.move_selected(program_id, [5.0, 2.0], 1)
+
+        assert _schedule_order(programs, program_id, songs) == list("ACBDE")
+    finally:
+        _cleanup_schedule(programs, program_id)
+
+
+def test_move_selected_everything_selected_is_a_no_op(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    # The whole schedule selected is one run starting at the top -
+    # moving up can never succeed, so nothing changes.
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedAllTest"
+    )
+
+    try:
+        programs.move_selected(program_id, [1.0, 2.0, 3.0, 4.0, 5.0], -1)
+
+        assert _schedule_order(programs, program_id, songs) == list("ABCDE")
+    finally:
+        _cleanup_schedule(programs, program_id)
+
+
+def test_move_selected_empty_positions_is_a_no_op(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedEmptyTest"
+    )
+
+    try:
+        programs.move_selected(program_id, [], -1)
+
+        assert _schedule_order(programs, program_id, songs) == list("ABCDE")
+    finally:
+        _cleanup_schedule(programs, program_id)
+
+
+def test_move_selected_ignores_position_not_currently_scheduled(
+    programs: ProgramService,
+    context: DatabaseContext,
+) -> None:
+    # A stale/unknown position in the list is skipped rather than
+    # raising, so one leftover selection from a just-deleted row
+    # can't abort moving the rest of a batch.
+    program_id, songs = _labelled_schedule_fixture(
+        programs, context, "MoveSelectedStaleTest"
+    )
+
+    try:
+        programs.move_selected(program_id, [2.0, 999.0], -1)
+
+        assert _schedule_order(programs, program_id, songs) == list("BACDE")
+    finally:
+        _cleanup_schedule(programs, program_id)

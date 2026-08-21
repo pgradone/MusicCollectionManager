@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -427,7 +428,43 @@ def test_schedule_has_move_up_and_move_down_controls(
         programs_repo.delete(program_id, commit=True)
 
 
-def test_swap_schedule_position_exchanges_positions(
+def _select_schedule_rows_by_song(
+    table_widget: QTableWidget, song_ids: set[Any]
+) -> None:
+    """Select every row in a Schedule table whose SongID (col 1) matches."""
+
+    selection_model = table_widget.selectionModel()
+    target_texts = {str(s) for s in song_ids}
+    for row in range(table_widget.rowCount()):
+        item = table_widget.item(row, 1)
+        if item is not None and item.text() in target_texts:
+            selection_model.select(
+                table_widget.model().index(row, 0),
+                selection_model.SelectionFlag.Select
+                | selection_model.SelectionFlag.Rows,
+            )
+
+
+def _schedule_table_widget(
+    crud_window: MainWindow, program_id: Any
+) -> QTableWidget:
+    idx = crud_window.table_combo.findText("Programs")
+    crud_window.table_combo.setCurrentIndex(idx)
+    row_idx = next(
+        r
+        for r in range(len(crud_window.table_rows))
+        if crud_window.table_rows[r]["ProgramID"] == program_id
+    )
+    crud_window.table_widget.selectRow(row_idx)
+
+    tab_widget = crud_window.related_tabs.widget(0)
+    assert tab_widget is not None
+    table_widget = tab_widget.findChild(QTableWidget)
+    assert table_widget is not None
+    return table_widget
+
+
+def test_move_selected_schedule_rows_single_row(
     crud_window: MainWindow,
 ) -> None:
     programs_repo = repository_for(crud_window.context, "Programs")
@@ -435,29 +472,17 @@ def test_swap_schedule_position_exchanges_positions(
     song_a, song_b = songs.all(limit=2)
 
     program_id = programs_repo.insert(
-        {"ProgName": "SwapScheduleUITest"}, commit=True
+        {"ProgName": "MoveScheduleSingleUITest"}, commit=True
     )
     program_service = ProgramService(crud_window.context)
     program_service.add_song(program_id, 1.0, song_id=song_a["SongID"])
     program_service.add_song(program_id, 2.0, song_id=song_b["SongID"])
 
     try:
-        idx = crud_window.table_combo.findText("Programs")
-        crud_window.table_combo.setCurrentIndex(idx)
-        row_idx = next(
-            r
-            for r in range(len(crud_window.table_rows))
-            if crud_window.table_rows[r]["ProgramID"] == program_id
-        )
-        crud_window.table_widget.selectRow(row_idx)
-
-        tab_widget = crud_window.related_tabs.widget(0)
-        assert tab_widget is not None
-        table_widget = tab_widget.findChild(QTableWidget)
-        assert table_widget is not None
+        table_widget = _schedule_table_widget(crud_window, program_id)
         table_widget.selectRow(0)  # song_a, currently Position 1
 
-        crud_window._swap_schedule_position(program_id, table_widget, 1)
+        crud_window._move_selected_schedule_rows(program_id, table_widget, 1)
 
         positions = {
             entry["SongID"]: entry["Position"]
@@ -465,6 +490,103 @@ def test_swap_schedule_position_exchanges_positions(
         }
         assert positions[song_a["SongID"]] == 2.0
         assert positions[song_b["SongID"]] == 1.0
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_move_selected_schedule_rows_non_adjacent_selection(
+    crud_window: MainWindow,
+) -> None:
+    """
+    Selecting two non-adjacent rows (e.g. the 2nd and 4th of five)
+    and clicking Move Up must move each independently, matching
+    ProgramService.move_selected()'s own behaviour - not just move
+    whichever row happened to be first in the selection.
+    """
+
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs = repository_for(crud_window.context, "Songs")
+    labelled = songs.all(limit=5)
+
+    program_id = programs_repo.insert(
+        {"ProgName": "MoveScheduleNonAdjacentUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    for index, song in enumerate(labelled, start=1):
+        program_service.add_song(program_id, float(index), song_id=song["SongID"])
+
+    try:
+        table_widget = _schedule_table_widget(crud_window, program_id)
+
+        # Select rows 1 and 3 (0-indexed) - the 2nd and 4th songs.
+        _select_schedule_rows_by_song(
+            table_widget, {labelled[1]["SongID"], labelled[3]["SongID"]}
+        )
+
+        crud_window._move_selected_schedule_rows(program_id, table_widget, -1)
+
+        schedule = sorted(
+            program_service.schedule_for_program(program_id),
+            key=lambda e: e["Position"],
+        )
+        song_id_order = [entry["SongID"] for entry in schedule]
+        expected_order = [
+            labelled[1]["SongID"],  # B moved to position 1
+            labelled[0]["SongID"],  # A displaced to position 2
+            labelled[3]["SongID"],  # D moved to position 3
+            labelled[2]["SongID"],  # C displaced to position 4
+            labelled[4]["SongID"],  # E untouched
+        ]
+        assert song_id_order == expected_order
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_move_selected_schedule_rows_keeps_selection_after_reload(
+    crud_window: MainWindow,
+) -> None:
+    """
+    After Move Up/Down triggers a reload, the same rows (at their
+    new positions) must remain selected - otherwise the user has to
+    re-select before every click, which is exactly what was reported.
+    """
+
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs = repository_for(crud_window.context, "Songs")
+    song_a, song_b = songs.all(limit=2)
+
+    program_id = programs_repo.insert(
+        {"ProgName": "MoveScheduleReselectUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(program_id, 1.0, song_id=song_a["SongID"])
+    program_service.add_song(program_id, 2.0, song_id=song_b["SongID"])
+
+    try:
+        table_widget = _schedule_table_widget(crud_window, program_id)
+        table_widget.selectRow(1)  # song_b, currently Position 2
+
+        crud_window._move_selected_schedule_rows(program_id, table_widget, -1)
+
+        # The subform was rebuilt by the reload - fetch the new table.
+        tab_widget = crud_window.related_tabs.widget(0)
+        assert tab_widget is not None
+        rebuilt_table = tab_widget.findChild(QTableWidget)
+        assert rebuilt_table is not None
+
+        selected_rows = {
+            index.row()
+            for index in rebuilt_table.selectionModel().selectedRows()
+        }
+        assert len(selected_rows) == 1
+        selected_row = next(iter(selected_rows))
+        song_id_item = rebuilt_table.item(selected_row, 1)
+        assert song_id_item is not None
+        assert int(song_id_item.text()) == song_b["SongID"]
     finally:
         for entry in program_service.schedule_for_program(program_id):
             program_service.remove_song(program_id, entry["Position"])
