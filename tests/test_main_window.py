@@ -935,11 +935,11 @@ def test_scheduled_programs_subform_shows_this_program(
 # covered by tests/test_report_service.py).
 
 
-def test_main_tabs_has_three_tabs(window: MainWindow) -> None:
-    assert window.main_tabs.count() == 3
+def test_main_tabs_has_four_tabs(window: MainWindow) -> None:
+    assert window.main_tabs.count() == 4
     assert [
         window.main_tabs.tabText(i) for i in range(window.main_tabs.count())
-    ] == ["Browse", "Dashboard", "Reports"]
+    ] == ["Browse", "Dashboard", "Reports", "Search"]
 
 
 def test_dashboard_matches_report_service(window: MainWindow) -> None:
@@ -1010,3 +1010,100 @@ def test_report_double_click_navigates_to_browse_tab(
     assert window.current_table == "Songs"
     assert window.current_row is not None
     assert window.current_row["SongID"] == song_id
+
+
+# ============================================================
+# Search tab (Milestone 5B (2/N))
+# ============================================================
+#
+# These run against the dedicated CRUD test database and clean up
+# whatever they create, exactly like the other crud_window tests.
+
+
+def test_global_search_finds_matches_across_tables(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    songs = repository_for(crud_window.context, "Songs")
+    records = repository_for(crud_window.context, "Records")
+    programs = repository_for(crud_window.context, "Programs")
+    styles = repository_for(crud_window.context, "Styles")
+
+    needle = "ZzzGlobalSearchUITest"
+    artist_id = artists.insert({"Surname": needle}, commit=True)
+    song_id = songs.insert({"Title": needle}, commit=True)
+    record_id = records.insert({"Title": needle}, commit=True)
+    program_id = programs.insert({"ProgName": needle}, commit=True)
+    style_id = styles.insert({"Label": needle}, commit=True)
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(3)  # Search
+        crud_window._global_search_box.setText(needle)
+        crud_window._run_global_search()
+
+        assert crud_window._search_table.rowCount() == 5
+
+        found: dict[str, str] = {}
+        for r in range(crud_window._search_table.rowCount()):
+            table_item = crud_window._search_table.item(r, 0)
+            id_item = crud_window._search_table.item(r, 2)
+            assert table_item is not None
+            assert id_item is not None
+            found[table_item.text()] = id_item.text()
+        assert found["Artists"] == str(artist_id)
+        assert found["Songs"] == str(song_id)
+        assert found["Records"] == str(record_id)
+        assert found["Programs"] == str(program_id)
+        assert found["Styles"] == str(style_id)
+        assert f"5 result(s)" in crud_window._search_summary_label.text()
+    finally:
+        artists.delete(artist_id, commit=True)
+        songs.delete(song_id, commit=True)
+        records.delete(record_id, commit=True)
+        programs.delete(program_id, commit=True)
+        styles.delete(style_id, commit=True)
+
+
+def test_global_search_blank_query_shows_no_results(
+    crud_window: MainWindow,
+) -> None:
+    crud_window.main_tabs.setCurrentIndex(3)
+    crud_window._global_search_box.setText("")
+    crud_window._run_global_search()
+
+    assert crud_window._search_table.rowCount() == 0
+    assert "Type something" in crud_window._search_summary_label.text()
+
+
+def test_search_row_double_click_navigates_to_browse_tab(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    needle = "ZzzSearchNavigateUITest"
+    artist_id = artists.insert({"Surname": needle}, commit=True)
+
+    try:
+        # crud_window redirects to the CRUD test database after
+        # MainWindow() already loaded Artists from the production
+        # one, and table_combo is still sitting on "Artists" from
+        # that initial load - so _navigate_to_related_value's own
+        # setCurrentIndex() call later is a no-op (Qt doesn't re-fire
+        # on an unchanged value) and won't refresh table_rows itself.
+        # Force a fresh load now, after inserting, so the Browse grid
+        # already contains the new artist before navigation runs.
+        crud_window.load_table_data("Artists")
+
+        crud_window.main_tabs.setCurrentIndex(3)
+        crud_window._global_search_box.setText(needle)
+        crud_window._run_global_search()
+
+        assert crud_window._search_table.rowCount() == 1
+
+        crud_window._on_search_row_double_clicked(0, 0)
+
+        assert crud_window.main_tabs.currentIndex() == 0
+        assert crud_window.current_table == "Artists"
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["ArtistID"] == artist_id
+    finally:
+        artists.delete(artist_id, commit=True)

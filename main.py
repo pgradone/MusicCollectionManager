@@ -44,6 +44,7 @@ from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, d
 from core.repository import RecordNotFoundError, repository_for
 from services.program_service import ProgramService, ProgramValidationError
 from services.report_service import ReportService
+from services.search_service import SearchResult, SearchService
 from services.song_service import SongService
 
 
@@ -186,6 +187,37 @@ def _position_sort_key(value: Any) -> tuple[int, str]:
     return (numeric, text)
 
 
+def _search_result_display(result: SearchResult) -> str:
+    """
+    A short, human-readable one-line summary of a search result,
+    tailored per entity type since each table's interesting columns
+    differ - e.g. an Artist's Surname/Name vs a Song's Title/Year.
+    """
+
+    row = result.row
+
+    if result.table == "Artists":
+        surname = row.get("Surname") or ""
+        name = row.get("Name")
+        return f"{surname}, {name}" if name else surname
+
+    if result.table == "Songs":
+        title = row.get("Title") or ""
+        year = row.get("Year")
+        return f"{title} ({year})" if year else title
+
+    if result.table == "Records":
+        return row.get("Title") or ""
+
+    if result.table == "Programs":
+        return row.get("ProgName") or ""
+
+    if result.table == "Styles":
+        return row.get("Label") or ""
+
+    return ""
+
+
 class MainWindow(QMainWindow):
     """Starter CRUD dashboard for the main database tables."""
 
@@ -200,6 +232,7 @@ class MainWindow(QMainWindow):
         # this, every Move Up/Down click would drop the selection and
         # force the user to re-select before clicking again.
         self._pending_schedule_reselect: tuple[Any, set[Any]] | None = None
+        self._last_search_results: list[SearchResult] = []
         self.current_table = ""
         self.current_row: dict[str, Any] | None = None
         self.column_names: list[str] = []
@@ -290,6 +323,7 @@ class MainWindow(QMainWindow):
         self.main_tabs.addTab(container, "Browse")
         self.main_tabs.addTab(self._build_dashboard_tab(), "Dashboard")
         self.main_tabs.addTab(self._build_reports_tab(), "Reports")
+        self.main_tabs.addTab(self._build_search_tab(), "Search")
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
 
         self.setCentralWidget(self.main_tabs)
@@ -806,6 +840,89 @@ class MainWindow(QMainWindow):
 
         columns = list(raw_result[0].keys())
         return raw_result, columns
+
+    # ========================================================
+    # Search tab
+    # ========================================================
+
+    def _build_search_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Search:"))
+        self._global_search_box = QLineEdit()
+        self._global_search_box.setPlaceholderText(
+            "Search Artists, Songs, Records, Programs, Styles..."
+        )
+        self._global_search_box.returnPressed.connect(self._run_global_search)
+        controls.addWidget(self._global_search_box, 1)
+
+        search_btn = QPushButton("Search")
+        search_btn.clicked.connect(self._run_global_search)
+        controls.addWidget(search_btn)
+        layout.addLayout(controls)
+
+        self._search_summary_label = QLabel(
+            "Type something and press Enter, or click Search."
+        )
+        layout.addWidget(self._search_summary_label)
+
+        self._search_table = QTableWidget()
+        self._search_table.setColumnCount(3)
+        self._search_table.setHorizontalHeaderLabels(["Table", "Match", "ID"])
+        self._search_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._search_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._search_table.setSortingEnabled(True)
+        self._search_table.cellDoubleClicked.connect(
+            self._on_search_row_double_clicked
+        )
+        layout.addWidget(self._search_table)
+
+        return widget
+
+    def _run_global_search(self) -> None:
+        if not self.context.started:
+            return
+
+        query = self._global_search_box.text()
+        search = SearchService(self.context)
+        results = search.search(query)
+        self._last_search_results = results
+
+        self._search_table.setSortingEnabled(False)
+        self._search_table.setRowCount(len(results))
+        for row_idx, result in enumerate(results):
+            values = [
+                result.table,
+                _search_result_display(result),
+                str(result.primary_key_value),
+            ]
+            for col_idx, value in enumerate(values):
+                item = TableItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._search_table.setItem(row_idx, col_idx, item)
+        self._search_table.resizeColumnsToContents()
+        self._search_table.setSortingEnabled(True)
+
+        if query.strip():
+            self._search_summary_label.setText(
+                f"{len(results)} result(s) for \"{query.strip()}\""
+            )
+        else:
+            self._search_summary_label.setText(
+                "Type something and press Enter, or click Search."
+            )
+
+    def _on_search_row_double_clicked(self, row: int, _column: int) -> None:
+        if row < 0 or row >= len(self._last_search_results):
+            return
+        result = self._last_search_results[row]
+        self._navigate_to_related_value(
+            result.table, result.primary_key_column, str(result.primary_key_value)
+        )
 
     def _direct_cell_links(self) -> dict[str, str]:
         """
