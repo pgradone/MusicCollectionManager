@@ -489,16 +489,16 @@ class MainWindow(QMainWindow):
 
         field.setToolTip(f"Double-click to open the linked {target_table} record")
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if (
-            isinstance(obj, QWidget)
+            isinstance(watched, QWidget)
             and event.type() == QEvent.Type.MouseButtonDblClick
-            and obj in self._form_fk_links
+            and watched in self._form_fk_links
         ):
-            column_name, target_table = self._form_fk_links[obj]
+            column_name, target_table = self._form_fk_links[watched]
             self._on_form_field_double_clicked(column_name, target_table)
             return True
-        return super().eventFilter(obj, event)
+        return super().eventFilter(watched, event)
 
     def _on_form_field_double_clicked(self, column_name: str, target_table: str) -> None:
         if self.current_row is None:
