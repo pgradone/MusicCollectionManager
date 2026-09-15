@@ -985,31 +985,52 @@ def test_report_row_count_matches_report_service(
     assert window._report_table.rowCount() == expected_rows
 
 
-def test_reports_refreshes_on_tab_switch(window: MainWindow) -> None:
-    assert window._report_table.rowCount() == 0
+def test_reports_refreshes_on_tab_switch(crud_window: MainWindow) -> None:
+    songs = repository_for(crud_window.context, "Songs")
+    song_id = songs.insert(
+        {"Title": "ZzzReportsRefreshUITest"}, commit=True
+    )
 
-    window.main_tabs.setCurrentIndex(2)
+    try:
+        assert crud_window._report_table.rowCount() == 0
 
-    assert window._report_table.rowCount() > 0
+        crud_window.main_tabs.setCurrentIndex(2)
+
+        assert crud_window._report_table.rowCount() > 0
+    finally:
+        songs.delete(song_id, commit=True)
 
 
 def test_report_double_click_navigates_to_browse_tab(
-    window: MainWindow,
+    crud_window: MainWindow,
 ) -> None:
-    window.main_tabs.setCurrentIndex(2)
-    window._report_combo.setCurrentIndex(0)  # Songs without an Artist
+    songs = repository_for(crud_window.context, "Songs")
+    song_id = songs.insert(
+        {"Title": "ZzzReportNavigateUITest"}, commit=True
+    )
 
-    assert window._report_table.rowCount() > 0
-    item = window._report_table.item(0, 0)
-    assert item is not None
-    song_id = int(item.text())
+    try:
+        crud_window.load_table_data("Songs")
 
-    window._on_report_row_double_clicked(0, 0)
+        crud_window.main_tabs.setCurrentIndex(2)
+        crud_window._report_combo.setCurrentIndex(0)  # Songs without an Artist
 
-    assert window.main_tabs.currentIndex() == 0
-    assert window.current_table == "Songs"
-    assert window.current_row is not None
-    assert window.current_row["SongID"] == song_id
+        matching_row = None
+        for r in range(crud_window._report_table.rowCount()):
+            cell = crud_window._report_table.item(r, 0)
+            if cell is not None and cell.text() == str(song_id):
+                matching_row = r
+                break
+        assert matching_row is not None
+
+        crud_window._on_report_row_double_clicked(matching_row, 0)
+
+        assert crud_window.main_tabs.currentIndex() == 0
+        assert crud_window.current_table == "Songs"
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["SongID"] == song_id
+    finally:
+        songs.delete(song_id, commit=True)
 
 
 # ============================================================
