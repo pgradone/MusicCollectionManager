@@ -5,6 +5,7 @@ import re
 import sqlite3
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypedDict
 
 from PySide6.QtCore import QDate, QEvent, QObject, Qt
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QDialog,
     QDialogButtonBox,
@@ -39,6 +41,7 @@ from PySide6.QtWidgets import (
 import config
 from core.context import DatabaseContext
 from core.database import ConnectionError, DatabaseError, DatabaseManager, QueryError
+from core.export import export_to_csv, export_to_excel, export_to_pdf
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
@@ -297,6 +300,16 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.save_button)
         controls_layout.addWidget(self.delete_button)
         controls_layout.addWidget(self.clear_button)
+
+        self.browse_export_button = QPushButton("Export")
+        self.browse_export_button.clicked.connect(
+            lambda: self._export_table_widget(
+                self.table_widget,
+                f"{self.current_table or 'export'}.csv",
+                self.current_table or "Export",
+            )
+        )
+        controls_layout.addWidget(self.browse_export_button)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.table_widget)
@@ -723,6 +736,16 @@ class MainWindow(QMainWindow):
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self._run_selected_report)
         controls.addWidget(refresh_btn)
+
+        export_btn = QPushButton("Export")
+        export_btn.clicked.connect(
+            lambda: self._export_table_widget(
+                self._report_table,
+                "report.csv",
+                self._report_combo.currentText() or "Report",
+            )
+        )
+        controls.addWidget(export_btn)
         layout.addLayout(controls)
 
         self._report_combo.currentIndexChanged.connect(self._run_selected_report)
@@ -861,6 +884,14 @@ class MainWindow(QMainWindow):
         search_btn = QPushButton("Search")
         search_btn.clicked.connect(self._run_global_search)
         controls.addWidget(search_btn)
+
+        export_btn = QPushButton("Export")
+        export_btn.clicked.connect(
+            lambda: self._export_table_widget(
+                self._search_table, "search_results.csv", "Search Results"
+            )
+        )
+        controls.addWidget(export_btn)
         layout.addLayout(controls)
 
         self._search_summary_label = QLabel(
@@ -923,6 +954,99 @@ class MainWindow(QMainWindow):
         self._navigate_to_related_value(
             result.table, result.primary_key_column, str(result.primary_key_value)
         )
+
+    # ========================================================
+    # Export (shared by Browse, Reports, and Search)
+    # ========================================================
+
+    def _export_table_widget(
+        self,
+        table_widget: QTableWidget,
+        default_filename: str,
+        title: str,
+    ) -> None:
+        """
+        Export a QTableWidget to CSV, Excel, or PDF, chosen by the
+        file extension the user picks in the save dialog.
+
+        Reads directly from the widget - visible rows only, in their
+        current visual (possibly sorted) order, using the current
+        column headers - rather than from whatever Python-side data
+        built the table. That guarantees "Export" always matches
+        exactly what's on screen: an active filter_rows() search
+        hides rows via setRowHidden() without touching the
+        underlying data, and a header-click sort reorders the
+        widget's rows without touching it either, so either kind of
+        stale mismatch is avoided by not relying on that data at all.
+        """
+
+        if table_widget.rowCount() == 0:
+            QMessageBox.information(self, "Export", "There is nothing to export.")
+            return
+
+        columns = []
+        for col in range(table_widget.columnCount()):
+            header_item = table_widget.horizontalHeaderItem(col)
+            columns.append(header_item.text() if header_item is not None else f"Column{col}")
+
+        rows: list[dict[str, Any]] = []
+        for row in range(table_widget.rowCount()):
+            if table_widget.isRowHidden(row):
+                continue
+            row_dict: dict[str, Any] = {}
+            for col, column_name in enumerate(columns):
+                item = table_widget.item(row, col)
+                if item is not None:
+                    row_dict[column_name] = item.text()
+                else:
+                    widget = table_widget.cellWidget(row, col)
+                    if isinstance(widget, QSpinBox):
+                        row_dict[column_name] = str(widget.value())
+                    else:
+                        row_dict[column_name] = ""
+            rows.append(row_dict)
+
+        if not rows:
+            QMessageBox.information(
+                self, "Export", "There is nothing visible to export."
+            )
+            return
+
+        config.EXPORT_FOLDER.mkdir(parents=True, exist_ok=True)
+        default_path = str(config.EXPORT_FOLDER / default_filename)
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export",
+            default_path,
+            "CSV Files (*.csv);;Excel Files (*.xlsx);;PDF Files (*.pdf)",
+        )
+        if not filename:
+            return
+
+        path = Path(filename)
+        suffix = path.suffix.lower()
+
+        try:
+            if suffix == ".csv":
+                export_to_csv(rows, columns, path)
+            elif suffix == ".xlsx":
+                export_to_excel(rows, columns, path, sheet_title=title)
+            elif suffix == ".pdf":
+                export_to_pdf(rows, columns, path, title=title)
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Export",
+                    f"Unsupported file type: {suffix or '(none)'}. "
+                    "Use .csv, .xlsx, or .pdf.",
+                )
+                return
+        except OSError as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+            return
+
+        self.message_label.setText(f"Exported {len(rows)} row(s) to {path.name}.")
 
     def _direct_cell_links(self) -> dict[str, str]:
         """

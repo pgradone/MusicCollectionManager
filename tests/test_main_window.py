@@ -22,12 +22,15 @@ QT_QPA_PLATFORM=offscreen set.
 
 from __future__ import annotations
 
+import csv
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from openpyxl import load_workbook
+from pypdf import PdfReader
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
@@ -985,31 +988,52 @@ def test_report_row_count_matches_report_service(
     assert window._report_table.rowCount() == expected_rows
 
 
-def test_reports_refreshes_on_tab_switch(window: MainWindow) -> None:
-    assert window._report_table.rowCount() == 0
+def test_reports_refreshes_on_tab_switch(crud_window: MainWindow) -> None:
+    songs = repository_for(crud_window.context, "Songs")
+    song_id = songs.insert(
+        {"Title": "ZzzReportsRefreshUITest"}, commit=True
+    )
 
-    window.main_tabs.setCurrentIndex(2)
+    try:
+        assert crud_window._report_table.rowCount() == 0
 
-    assert window._report_table.rowCount() > 0
+        crud_window.main_tabs.setCurrentIndex(2)
+
+        assert crud_window._report_table.rowCount() > 0
+    finally:
+        songs.delete(song_id, commit=True)
 
 
 def test_report_double_click_navigates_to_browse_tab(
-    window: MainWindow,
+    crud_window: MainWindow,
 ) -> None:
-    window.main_tabs.setCurrentIndex(2)
-    window._report_combo.setCurrentIndex(0)  # Songs without an Artist
+    songs = repository_for(crud_window.context, "Songs")
+    song_id = songs.insert(
+        {"Title": "ZzzReportNavigateUITest"}, commit=True
+    )
 
-    assert window._report_table.rowCount() > 0
-    item = window._report_table.item(0, 0)
-    assert item is not None
-    song_id = int(item.text())
+    try:
+        crud_window.load_table_data("Songs")
 
-    window._on_report_row_double_clicked(0, 0)
+        crud_window.main_tabs.setCurrentIndex(2)
+        crud_window._report_combo.setCurrentIndex(0)  # Songs without an Artist
 
-    assert window.main_tabs.currentIndex() == 0
-    assert window.current_table == "Songs"
-    assert window.current_row is not None
-    assert window.current_row["SongID"] == song_id
+        matching_row = None
+        for r in range(crud_window._report_table.rowCount()):
+            cell = crud_window._report_table.item(r, 0)
+            if cell is not None and cell.text() == str(song_id):
+                matching_row = r
+                break
+        assert matching_row is not None
+
+        crud_window._on_report_row_double_clicked(matching_row, 0)
+
+        assert crud_window.main_tabs.currentIndex() == 0
+        assert crud_window.current_table == "Songs"
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["SongID"] == song_id
+    finally:
+        songs.delete(song_id, commit=True)
 
 
 # ============================================================
@@ -1107,3 +1131,175 @@ def test_search_row_double_click_navigates_to_browse_tab(
         assert crud_window.current_row["ArtistID"] == artist_id
     finally:
         artists.delete(artist_id, commit=True)
+
+
+# ============================================================
+# Export (Milestone 5C (2/N)): Browse, Reports, Search
+# ============================================================
+#
+# These patch QFileDialog.getSaveFileName so no real dialog ever
+# opens, and (where relevant) patch QMessageBox so a blocking modal
+# never waits for a click that can't come in an automated test.
+
+
+def test_browse_export_writes_all_loaded_rows(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    window.load_table_data("Styles")
+    export_path = tmp_path / "styles.csv"
+
+    with patch(
+        "main.QFileDialog.getSaveFileName",
+        return_value=(str(export_path), ""),
+    ):
+        window._export_table_widget(window.table_widget, "styles.csv", "Styles")
+
+    with open(export_path, newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == len(window.table_rows)
+    assert rows[0]["Label"] == window.table_rows[0]["Label"]
+
+
+def test_browse_export_respects_active_filter(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    """
+    filter_rows() hides rows with setRowHidden() without touching
+    table_rows - export must follow what's visible, not the full
+    underlying dataset, or a deliberately filtered export would
+    silently include everything anyway.
+    """
+
+    window.load_table_data("Styles")
+    sample_label = window.table_rows[0]["Label"]
+    window.search_box.setText(sample_label)
+    window.filter_rows()
+
+    visible_count = sum(
+        1
+        for row in range(window.table_widget.rowCount())
+        if not window.table_widget.isRowHidden(row)
+    )
+    assert visible_count < len(window.table_rows)
+
+    export_path = tmp_path / "filtered.csv"
+    with patch(
+        "main.QFileDialog.getSaveFileName",
+        return_value=(str(export_path), ""),
+    ):
+        window._export_table_widget(window.table_widget, "styles.csv", "Styles")
+
+    with open(export_path, newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == visible_count
+
+
+def test_reports_export_to_excel(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    songs = repository_for(crud_window.context, "Songs")
+    song_id = songs.insert(
+        {"Title": "ZzzReportsExportUITest"}, commit=True
+    )
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(2)
+        crud_window._report_combo.setCurrentIndex(0)  # Songs without an Artist
+        report_rows = crud_window._report_table.rowCount()
+        assert report_rows > 0
+
+        export_path = tmp_path / "report.xlsx"
+        with patch(
+            "main.QFileDialog.getSaveFileName",
+            return_value=(str(export_path), ""),
+        ):
+            crud_window._export_table_widget(
+                crud_window._report_table,
+                "report.csv",
+                crud_window._report_combo.currentText(),
+            )
+
+        workbook = load_workbook(export_path)
+        worksheet = workbook.active
+        assert worksheet is not None
+        assert worksheet.max_row - 1 == report_rows
+        assert worksheet.title == "Songs without an Artist"
+    finally:
+        songs.delete(song_id, commit=True)
+
+
+def test_search_export_to_pdf(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    needle = "ZzzSearchExportUITest"
+    artist_id = artists.insert({"Surname": needle}, commit=True)
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(3)
+        crud_window._global_search_box.setText(needle)
+        crud_window._run_global_search()
+        assert crud_window._search_table.rowCount() == 1
+
+        export_path = tmp_path / "search.pdf"
+        with patch(
+            "main.QFileDialog.getSaveFileName",
+            return_value=(str(export_path), ""),
+        ):
+            crud_window._export_table_widget(
+                crud_window._search_table, "search_results.csv", "Search Results"
+            )
+
+        text = PdfReader(export_path).pages[0].extract_text()
+        assert "Search Results" in text
+        assert needle in text
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_export_shows_message_when_nothing_to_export(
+    window: MainWindow,
+) -> None:
+    window.main_tabs.setCurrentIndex(3)
+    window._global_search_box.setText("")
+    window._run_global_search()
+    assert window._search_table.rowCount() == 0
+
+    with patch("main.QMessageBox.information") as mock_information:
+        window._export_table_widget(window._search_table, "x.csv", "X")
+        mock_information.assert_called_once()
+
+
+def test_export_cancelled_dialog_does_nothing(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    window.load_table_data("Styles")
+
+    with patch(
+        "main.QFileDialog.getSaveFileName", return_value=("", "")
+    ):
+        # Should return cleanly without attempting to write anything.
+        window._export_table_widget(window.table_widget, "styles.csv", "Styles")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_export_unsupported_extension_warns_and_writes_nothing(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    window.load_table_data("Styles")
+    export_path = tmp_path / "styles.txt"
+
+    with patch(
+        "main.QFileDialog.getSaveFileName",
+        return_value=(str(export_path), ""),
+    ):
+        with patch("main.QMessageBox.warning") as mock_warning:
+            window._export_table_widget(
+                window.table_widget, "styles.csv", "Styles"
+            )
+            mock_warning.assert_called_once()
+
+    assert not export_path.exists()
