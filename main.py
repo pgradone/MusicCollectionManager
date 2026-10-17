@@ -155,22 +155,6 @@ def collect_database_info(db: DatabaseManager) -> DatabaseInfo:
         }
 
 
-def build_table_query(table_name: str, db: DatabaseManager | None = None) -> str:
-    """Build a simple read query for the selected table."""
-
-    database = db or DatabaseManager()
-    columns = [column["name"] for column in database.columns(table_name)]
-
-    if not columns:
-        return f"SELECT * FROM [{table_name}]"
-
-    quoted_columns = ", ".join(f"[{column}]" for column in columns)
-    primary_key = database.primary_key(table_name)
-    order_clause = f" ORDER BY [{primary_key}]" if primary_key else ""
-
-    return f"SELECT {quoted_columns} FROM [{table_name}]{order_clause}"
-
-
 def _position_sort_key(value: Any) -> tuple[int, str]:
     """
     Sort key mirroring SQLite's old ORDER BY CAST(Position AS INTEGER),
@@ -1194,63 +1178,6 @@ class MainWindow(QMainWindow):
         if 0 <= previous_index < self.related_tabs.count():
             self.related_tabs.setCurrentIndex(previous_index)
 
-
-    def _build_related_table_widget(
-        self,
-        relation_table: str,
-        title: str,
-        fk: sqlite3.Row,
-        primary_value: Any,
-    ) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        other_fk = [candidate for candidate in self.db.foreign_keys(relation_table) if candidate["from"] != fk["from"]][0]
-        target_table = other_fk["table"]
-        target_pk = self.db.primary_key(target_table)
-        columns = [column["name"] for column in self.db.columns(target_table)]
-
-        label = QLabel(f"{title} linked through {relation_table}")
-        layout.addWidget(label)
-
-        table = QTableWidget()
-        table.setColumnCount(len(columns))
-        table.setHorizontalHeaderLabels(columns)
-
-        query = (
-            f"SELECT {', '.join(f'[{target_table}].[{name}]' for name in columns)} "
-            f"FROM [{target_table}] "
-            f"INNER JOIN [{relation_table}] ON [{target_table}].[{target_pk}] = [{relation_table}].[{other_fk['from']}] "
-            f"WHERE [{relation_table}].[{fk['from']}] = ?"
-        )
-        rows = self.db.fetchall(query, (primary_value,))
-
-        table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            for column_index, column_name in enumerate(columns):
-                value = row[column_name]
-                text = "" if value is None else str(value)
-                table.setItem(row_index, column_index, TableItem(text))
-
-        table.resizeColumnsToContents()
-        table.setSortingEnabled(True)
-        table.cellDoubleClicked.connect(
-            lambda r, c, t=target_table, p=target_pk, tw=table: self._navigate_to_record(t, p, tw, r)
-        )
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(table)
-
-        add_button = QPushButton("Add relation")
-        delete_button = QPushButton("Delete relation")
-        add_button.clicked.connect(lambda _, t=relation_table, fk=fk, pv=primary_value, tw=table: self._open_association_editor(t, fk, pv, tw))
-        delete_button.clicked.connect(lambda _, t=relation_table, fk=fk, pv=primary_value, tw=table: self._delete_association_relation(t, fk, pv, tw))
-        button_layout = QHBoxLayout()
-        button_layout.addWidget(add_button)
-        button_layout.addWidget(delete_button)
-        layout.addLayout(button_layout)
-
-        return widget
-
     def _build_junction_subform(
         self,
         relationship: Relationship,
@@ -1877,83 +1804,6 @@ class MainWindow(QMainWindow):
             except (RelationshipError, RecordNotFoundError, QueryError) as exc:
                 logger.warning("Could not renumber position: %s", exc)
 
-        self.load_table_data(self.current_table)
-
-    def _open_association_editor(
-        self,
-        association_table: str,
-        fk: sqlite3.Row,
-        primary_value: Any,
-        table_widget: QTableWidget | None = None,
-    ) -> None:
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Link {association_table}")
-        dialog_layout = QVBoxLayout(dialog)
-
-        target_column = [candidate for candidate in self.db.foreign_keys(association_table) if candidate['from'] != fk['from']][0]
-        target_table = target_column['table']
-        target_pk = self.db.primary_key(target_table)
-        if not target_pk:
-            QMessageBox.warning(self, "Cannot add relation", f"No primary key found for {target_table}")
-            return
-
-        list_widget = QListWidget()
-        rows = self.db.fetchall(f"SELECT [{target_pk}], [{', '.join([c['name'] for c in self.db.columns(target_table) if c['name'] != target_pk])}] FROM [{target_table}] ORDER BY [{target_pk}]")
-        self._association_rows = []
-        for row in rows:
-            list_widget.addItem(f"{row[target_pk]} - {row[1]}")
-            self._association_rows.append(row)
-
-        dialog_layout.addWidget(QLabel(f"Choose {target_table} to link to this {self.current_table}"))
-        dialog_layout.addWidget(list_widget)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        dialog_layout.addWidget(buttons)
-
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        current_index = list_widget.currentRow()
-        if current_index < 0:
-            return
-
-        selected_row = self._association_rows[current_index]
-        target_value = selected_row[target_pk]
-
-        self.db.execute(
-            f"INSERT OR IGNORE INTO [{association_table}] ([{fk['from']}], [{target_column['from']}]) VALUES (?, ?)",
-            (primary_value, target_value),
-        )
-        self.db.commit()
-        self.load_table_data(self.current_table)
-
-    def _delete_association_relation(
-        self,
-        association_table: str,
-        fk: sqlite3.Row,
-        primary_value: Any,
-        table_widget: QTableWidget,
-    ) -> None:
-        selected_rows = table_widget.selectionModel().selectedRows()
-        if not selected_rows:
-            QMessageBox.information(self, "Delete relation", "Select a row first.")
-            return
-
-        row_index = selected_rows[0].row()
-        columns = [column['name'] for column in self.db.columns(association_table)]
-        selected_row: dict[str, str] = {}
-        for idx in range(table_widget.columnCount()):
-            item = table_widget.item(row_index, idx)
-            selected_row[columns[idx]] = "" if item is None else item.text()
-
-        target_column = [candidate for candidate in self.db.foreign_keys(association_table) if candidate['from'] != fk['from']][0]
-        self.db.execute(
-            f"DELETE FROM [{association_table}] WHERE [{fk['from']}] = ? AND [{target_column['from']}] = ?",
-            (primary_value, int(selected_row[target_column['from']])),
-        )
-        self.db.commit()
         self.load_table_data(self.current_table)
 
     def on_row_selected(self) -> None:
