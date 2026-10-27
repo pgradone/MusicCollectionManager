@@ -45,6 +45,7 @@ from core.export import export_to_csv, export_to_excel, export_to_pdf
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
+from services.discogs_service import DiscogsService
 from services.program_service import ProgramService, ProgramValidationError
 from services.report_service import ReportService
 from services.search_service import SearchResult, SearchService
@@ -205,6 +206,18 @@ def _search_result_display(result: SearchResult) -> str:
     return ""
 
 
+# Column headers and the dict keys they show, for the Discogs tab's
+# release list (DiscogsService.list_releases adds "RecordTitle").
+_DISCOGS_COLUMNS: list[tuple[str, str]] = [
+    ("Release ID", "release_id"),
+    ("Artist", "Artist"),
+    ("Title", "Title"),
+    ("Label", "Label"),
+    ("Format", "Format"),
+    ("Record", "RecordTitle"),
+]
+
+
 class MainWindow(QMainWindow):
     """Starter CRUD dashboard for the main database tables."""
 
@@ -321,6 +334,7 @@ class MainWindow(QMainWindow):
         self.main_tabs.addTab(self._build_dashboard_tab(), "Dashboard")
         self.main_tabs.addTab(self._build_reports_tab(), "Reports")
         self.main_tabs.addTab(self._build_search_tab(), "Search")
+        self.main_tabs.addTab(self._build_discogs_tab(), "Discogs")
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
 
         self.setCentralWidget(self.main_tabs)
@@ -599,6 +613,8 @@ class MainWindow(QMainWindow):
             self._refresh_dashboard()
         elif widget is self._reports_widget:
             self._run_selected_report()
+        elif widget is self._discogs_widget:
+            self._refresh_discogs()
 
     # ========================================================
     # Dashboard tab
@@ -937,6 +953,344 @@ class MainWindow(QMainWindow):
         result = self._last_search_results[row]
         self._navigate_to_related_value(
             result.table, result.primary_key_column, str(result.primary_key_value)
+        )
+
+    # ========================================================
+    # Discogs tab
+    # ========================================================
+
+    def _build_discogs_tab(self) -> QWidget:
+        widget = QWidget()
+        self._discogs_widget = widget
+        self._discogs_releases: dict[str, dict[str, Any]] = {}
+        layout = QVBoxLayout(widget)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Discogs ID or link:"))
+        self._discogs_id_box = QLineEdit()
+        self._discogs_id_box.setPlaceholderText(
+            "e.g. 98675, [r98675] or a discogs.com release link"
+        )
+        self._discogs_id_box.returnPressed.connect(self._run_discogs_lookup)
+        controls.addWidget(self._discogs_id_box, 1)
+
+        lookup_btn = QPushButton("Look up")
+        lookup_btn.clicked.connect(self._run_discogs_lookup)
+        controls.addWidget(lookup_btn)
+
+        self._discogs_filter = QComboBox()
+        self._discogs_filter.addItem("All releases", None)
+        self._discogs_filter.addItem("Linked to a record", True)
+        self._discogs_filter.addItem("Not linked yet", False)
+        self._discogs_filter.currentIndexChanged.connect(self._refresh_discogs)
+        controls.addWidget(self._discogs_filter)
+
+        export_btn = QPushButton("Export")
+        export_btn.clicked.connect(
+            lambda: self._export_table_widget(
+                self._discogs_table, "discogs_releases.csv", "Discogs Releases"
+            )
+        )
+        controls.addWidget(export_btn)
+        layout.addLayout(controls)
+
+        self._discogs_status = QLabel("")
+        layout.addWidget(self._discogs_status)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        self._discogs_table = QTableWidget()
+        self._discogs_table.setColumnCount(len(_DISCOGS_COLUMNS))
+        self._discogs_table.setHorizontalHeaderLabels(
+            [label for label, _key in _DISCOGS_COLUMNS]
+        )
+        self._discogs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._discogs_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._discogs_table.setSelectionMode(
+            QTableWidget.SelectionMode.SingleSelection
+        )
+        self._discogs_table.setSortingEnabled(True)
+        self._discogs_table.itemSelectionChanged.connect(
+            self._on_discogs_release_selected
+        )
+        self._discogs_table.cellDoubleClicked.connect(
+            self._on_discogs_release_double_clicked
+        )
+        splitter.addWidget(self._discogs_table)
+
+        detail = QWidget()
+        detail_layout = QVBoxLayout(detail)
+        self._discogs_detail_label = QLabel("Select a release.")
+        self._discogs_detail_label.setWordWrap(True)
+        detail_layout.addWidget(self._discogs_detail_label)
+
+        self._discogs_tracks_group = QGroupBox("Songs on the linked record")
+        tracks_layout = QVBoxLayout(self._discogs_tracks_group)
+        self._discogs_tracks_table = QTableWidget()
+        self._discogs_tracks_table.setColumnCount(3)
+        self._discogs_tracks_table.setHorizontalHeaderLabels(
+            ["Position", "SongID", "Title"]
+        )
+        self._discogs_tracks_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self._discogs_tracks_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._discogs_tracks_table.cellDoubleClicked.connect(
+            lambda r, c: self._navigate_to_record(
+                "Songs", "SongID", self._discogs_tracks_table, r
+            )
+        )
+        tracks_layout.addWidget(self._discogs_tracks_table)
+        detail_layout.addWidget(self._discogs_tracks_group)
+
+        self._discogs_suggest_group = QGroupBox("Suggested records for this release")
+        suggest_layout = QVBoxLayout(self._discogs_suggest_group)
+        self._discogs_suggest_table = QTableWidget()
+        self._discogs_suggest_table.setColumnCount(4)
+        self._discogs_suggest_table.setHorizontalHeaderLabels(
+            ["Match", "RecordID", "Title", "Artist"]
+        )
+        self._discogs_suggest_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers
+        )
+        self._discogs_suggest_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self._discogs_suggest_table.setSelectionMode(
+            QTableWidget.SelectionMode.SingleSelection
+        )
+        self._discogs_suggest_table.cellDoubleClicked.connect(
+            lambda r, c: self._navigate_to_record(
+                "Records", "RecordID", self._discogs_suggest_table, r
+            )
+        )
+        suggest_layout.addWidget(self._discogs_suggest_table)
+        self._discogs_link_button = QPushButton("Link selected record")
+        self._discogs_link_button.clicked.connect(
+            self._link_selected_discogs_suggestion
+        )
+        suggest_layout.addWidget(self._discogs_link_button)
+        detail_layout.addWidget(self._discogs_suggest_group)
+
+        self._discogs_tracks_group.setVisible(False)
+        self._discogs_suggest_group.setVisible(False)
+
+        splitter.addWidget(detail)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter, 1)
+
+        return widget
+
+    def _selected_discogs_release_id(self) -> str | None:
+        rows = self._discogs_table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        item = self._discogs_table.item(rows[0].row(), 0)
+        return item.text() if item is not None else None
+
+    def _select_discogs_release(self, release_id: str) -> bool:
+        for row in range(self._discogs_table.rowCount()):
+            item = self._discogs_table.item(row, 0)
+            if item is not None and item.text() == release_id:
+                self._discogs_table.selectRow(row)
+                self._discogs_table.scrollToItem(item)
+                return True
+        return False
+
+    def _refresh_discogs(self) -> None:
+        if not self.context.started:
+            return
+
+        previously_selected = self._selected_discogs_release_id()
+        releases = DiscogsService(self.context).list_releases(
+            linked=self._discogs_filter.currentData()
+        )
+        self._discogs_releases = {r["release_id"]: r for r in releases}
+
+        table = self._discogs_table
+        table.setSortingEnabled(False)
+        table.clearSelection()
+        table.setRowCount(len(releases))
+        for row_idx, release in enumerate(releases):
+            for col_idx, (_label, key) in enumerate(_DISCOGS_COLUMNS):
+                value = release.get(key)
+                item = TableItem("" if value is None else str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_idx, col_idx, item)
+        table.resizeColumnsToContents()
+        table.setSortingEnabled(True)
+
+        self._discogs_status.setText(f"{len(releases)} release(s)")
+
+        if previously_selected is None or not self._select_discogs_release(
+            previously_selected
+        ):
+            self._on_discogs_release_selected()
+
+    def _on_discogs_release_selected(self) -> None:
+        self._discogs_tracks_group.setVisible(False)
+        self._discogs_suggest_group.setVisible(False)
+
+        release_id = self._selected_discogs_release_id()
+        if release_id is None:
+            self._discogs_detail_label.setText("Select a release.")
+            return
+
+        service = DiscogsService(self.context)
+        lookup = service.lookup(release_id)
+        if lookup is None:
+            self._discogs_detail_label.setText("Release not found.")
+            return
+
+        release = lookup.release
+        lines = [
+            f"{release['Artist'] or ''} - {release['Title'] or ''}"
+            f"   [{release['Label'] or ''}, {release['Format'] or ''}]"
+            f"   Released: {release['Released'] or '?'}"
+            f"   Discogs ID {release_id}"
+        ]
+
+        if lookup.record is not None:
+            record = lookup.record
+            artist = lookup.artist
+            artist_name = (
+                f"{artist['Name'] or ''} {artist['Surname'] or ''}".strip()
+                if artist is not None
+                else "no artist"
+            )
+            lines.append(
+                f"Linked to record #{record['RecordID']}: "
+                f"{record['Title'] or ''} ({artist_name})"
+            )
+            self._fill_discogs_tracks(lookup.tracks)
+            self._discogs_tracks_group.setVisible(True)
+        else:
+            lines.append("Not linked to a record yet.")
+            self._fill_discogs_suggestions(service, release_id)
+            self._discogs_suggest_group.setVisible(True)
+
+        self._discogs_detail_label.setText("\n".join(lines))
+
+    def _fill_discogs_tracks(self, tracks: list[dict[str, Any]]) -> None:
+        table = self._discogs_tracks_table
+        table.setRowCount(len(tracks))
+        for row_idx, track in enumerate(tracks):
+            for col_idx, key in enumerate(["Position", "SongID", "Title"]):
+                value = track.get(key)
+                item = TableItem("" if value is None else str(value))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_idx, col_idx, item)
+        table.resizeColumnsToContents()
+
+    def _fill_discogs_suggestions(
+        self, service: DiscogsService, release_id: str
+    ) -> None:
+        suggestions = service.suggest_records(release_id)
+        artists = repository_for(self.context, "Artists")
+
+        table = self._discogs_suggest_table
+        table.setRowCount(len(suggestions))
+        for row_idx, suggestion in enumerate(suggestions):
+            record = suggestion.record
+            artist = (
+                artists.get(record["ArtistID"])
+                if record["ArtistID"] is not None
+                else None
+            )
+            artist_name = (
+                f"{artist['Name'] or ''} {artist['Surname'] or ''}".strip()
+                if artist is not None
+                else ""
+            )
+            values = [
+                f"{round(suggestion.score * 100)}%",
+                str(record["RecordID"]),
+                record["Title"] or "",
+                artist_name,
+            ]
+            for col_idx, value in enumerate(values):
+                item = TableItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row_idx, col_idx, item)
+        table.resizeColumnsToContents()
+
+        self._discogs_suggest_group.setTitle(
+            f"Suggested records for this release ({len(suggestions)} found)"
+        )
+
+    def _run_discogs_lookup(self) -> None:
+        if not self.context.started:
+            return
+
+        text = self._discogs_id_box.text()
+        if not text.strip():
+            self._discogs_status.setText("Type a Discogs ID or paste a release link.")
+            return
+
+        result = DiscogsService(self.context).lookup(text)
+        if result is None:
+            self._discogs_status.setText(
+                f'No release found for "{text.strip()}".'
+            )
+            return
+
+        release_id = result.release["release_id"]
+
+        # Make sure the release is visible: switching the filter back
+        # to "All" refreshes the list through its own signal.
+        if self._discogs_filter.currentData() is not None:
+            self._discogs_filter.setCurrentIndex(0)
+        else:
+            self._refresh_discogs()
+
+        self._select_discogs_release(release_id)
+        self._discogs_status.setText(f"Found release {release_id}.")
+
+    def _on_discogs_release_double_clicked(self, row: int, _column: int) -> None:
+        item = self._discogs_table.item(row, 0)
+        if item is None:
+            return
+
+        release = self._discogs_releases.get(item.text())
+        if release is None or release.get("RecordID") is None:
+            self._discogs_status.setText("This release has no record yet.")
+            return
+
+        self._navigate_to_related_value(
+            "Records", "RecordID", str(release["RecordID"])
+        )
+
+    def _link_selected_discogs_suggestion(self) -> None:
+        release_id = self._selected_discogs_release_id()
+        row = self._discogs_suggest_table.currentRow()
+        record_item = (
+            self._discogs_suggest_table.item(row, 1) if row >= 0 else None
+        )
+
+        if release_id is None or record_item is None:
+            self._discogs_status.setText("Select a suggested record first.")
+            return
+
+        # Read the text now: _refresh_discogs() below rebuilds these
+        # tables, which deletes the item this was read from.
+        record_text = record_item.text()
+
+        try:
+            DiscogsService(self.context).confirm_match(
+                release_id, int(record_text)
+            )
+        except (DatabaseError, ValueError) as exc:
+            self._discogs_status.setText(f"Could not link: {exc}")
+            return
+
+        self._refresh_discogs()
+        self._discogs_status.setText(
+            f"Linked release {release_id} to record {record_text}."
         )
 
     # ========================================================

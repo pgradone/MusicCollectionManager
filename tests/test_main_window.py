@@ -44,7 +44,9 @@ from PySide6.QtWidgets import (
 from core.relationship_operations import link, list_related, unlink
 from core.relationships import JUNCTION, discover_relationships
 from main import REPORT_DEFINITIONS, SOFT_FOREIGN_KEYS, MainWindow
+from services.discogs_service import DiscogsService
 from services.program_service import ProgramService
+from services.record_service import RecordService
 from services.report_service import ReportService
 from services.song_service import SongService
 from core.repository import repository_for
@@ -938,11 +940,11 @@ def test_scheduled_programs_subform_shows_this_program(
 # covered by tests/test_report_service.py).
 
 
-def test_main_tabs_has_four_tabs(window: MainWindow) -> None:
-    assert window.main_tabs.count() == 4
+def test_main_tabs_has_five_tabs(window: MainWindow) -> None:
+    assert window.main_tabs.count() == 5
     assert [
         window.main_tabs.tabText(i) for i in range(window.main_tabs.count())
-    ] == ["Browse", "Dashboard", "Reports", "Search"]
+    ] == ["Browse", "Dashboard", "Reports", "Search", "Discogs"]
 
 
 def test_dashboard_matches_report_service(window: MainWindow) -> None:
@@ -1303,3 +1305,260 @@ def test_export_unsupported_extension_warns_and_writes_nothing(
             mock_warning.assert_called_once()
 
     assert not export_path.exists()
+
+
+# ============================================================
+# Discogs tab (Milestone 6A (2/N))
+# ============================================================
+#
+# Synthetic release ids start with "99" and have six digits, e.g.
+# "990101". Rows are created in the CRUD test database and removed
+# again; QMessageBox is never reached (the tab reports problems in
+# its status label), so nothing here can block on a dialog.
+
+DISCOGS_TAB_INDEX = 4
+
+
+def _make_discogs_fixture(
+    context: Any, release_id: str, tag: str, *, linked: bool
+) -> tuple[int, int, int | None]:
+    """Create artist + record + release (+ one track and the link)."""
+
+    artists = repository_for(context, "Artists")
+    songs = repository_for(context, "Songs")
+    records = RecordService(context)
+
+    artist_id = artists.insert({"Surname": f"Zzz{tag}"}, commit=True)
+    record_id = records.create(title=f"Zzz{tag} Title", artist_id=artist_id)
+    repository_for(context, "Discogs").insert(
+        {
+            "ID": 990000 + int(release_id[2:]),
+            "release_id": release_id,
+            "Artist": f"Zzz{tag}",
+            "Title": f"Zzz{tag} Title",
+        },
+        commit=True,
+    )
+
+    song_id = None
+    if linked:
+        song_id = songs.insert({"Title": f"Zzz{tag} Song"}, commit=True)
+        records.add_track(record_id, song_id, position="A1")
+        records.link_discogs(record_id, release_id)
+
+    return artist_id, record_id, song_id
+
+
+def _drop_discogs_fixture(
+    context: Any,
+    release_id: str,
+    artist_id: int,
+    record_id: int,
+    song_id: int | None,
+) -> None:
+    records = RecordService(context)
+    records.unlink_discogs(record_id)
+    if song_id is not None:
+        records.remove_track(record_id, song_id)
+        repository_for(context, "Songs").delete(song_id, commit=True)
+    records.delete(record_id)
+    repository_for(context, "Artists").delete(artist_id, commit=True)
+    repository_for(context, "Discogs").delete(release_id, commit=True)
+
+
+def test_discogs_tab_loads_releases_when_opened(window: MainWindow) -> None:
+    assert window._discogs_table.rowCount() == 0
+
+    window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+
+    expected = len(DiscogsService(window.context).list_releases())
+    assert expected > 0
+    assert window._discogs_table.rowCount() == expected
+
+
+def test_discogs_filter_splits_linked_and_unlinked(window: MainWindow) -> None:
+    window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+    service = DiscogsService(window.context)
+
+    window._discogs_filter.setCurrentIndex(1)
+    assert window._discogs_table.rowCount() == len(
+        service.list_releases(linked=True)
+    )
+
+    window._discogs_filter.setCurrentIndex(2)
+    assert window._discogs_table.rowCount() == len(
+        service.list_releases(linked=False)
+    )
+
+
+def test_discogs_lookup_unknown_id_is_reported(window: MainWindow) -> None:
+    window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+    window._discogs_id_box.setText("999999999")
+    window._run_discogs_lookup()
+
+    assert "No release found" in window._discogs_status.text()
+
+
+def test_discogs_lookup_blank_input_asks_for_an_id(window: MainWindow) -> None:
+    window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+    window._discogs_id_box.setText("   ")
+    window._run_discogs_lookup()
+
+    assert "Type a Discogs ID" in window._discogs_status.text()
+
+
+def test_discogs_lookup_shows_record_and_tracks(
+    crud_window: MainWindow,
+) -> None:
+    context = crud_window.context
+    artist_id, record_id, song_id = _make_discogs_fixture(
+        context, "990101", "DiscogsTabLinked", linked=True
+    )
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+        crud_window._discogs_id_box.setText(
+            "https://www.discogs.com/release/990101-Anything"
+        )
+        crud_window._run_discogs_lookup()
+
+        assert crud_window._selected_discogs_release_id() == "990101"
+        assert not crud_window._discogs_tracks_group.isHidden()
+        assert crud_window._discogs_suggest_group.isHidden()
+        assert f"record #{record_id}" in crud_window._discogs_detail_label.text()
+        assert crud_window._discogs_tracks_table.rowCount() == 1
+        position_item = crud_window._discogs_tracks_table.item(0, 0)
+        assert position_item is not None
+        assert position_item.text() == "A1"
+    finally:
+        _drop_discogs_fixture(context, "990101", artist_id, record_id, song_id)
+
+
+def test_discogs_lookup_resets_a_filter_that_would_hide_the_release(
+    crud_window: MainWindow,
+) -> None:
+    context = crud_window.context
+    artist_id, record_id, song_id = _make_discogs_fixture(
+        context, "990102", "DiscogsTabFilter", linked=True
+    )
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+        crud_window._discogs_filter.setCurrentIndex(2)  # not linked yet
+        assert "990102" not in crud_window._discogs_releases
+
+        crud_window._discogs_id_box.setText("990102")
+        crud_window._run_discogs_lookup()
+
+        assert crud_window._discogs_filter.currentIndex() == 0
+        assert crud_window._selected_discogs_release_id() == "990102"
+    finally:
+        _drop_discogs_fixture(context, "990102", artist_id, record_id, song_id)
+
+
+def test_discogs_unlinked_release_offers_suggestions_and_links(
+    crud_window: MainWindow,
+) -> None:
+    context = crud_window.context
+    artist_id, record_id, song_id = _make_discogs_fixture(
+        context, "990103", "DiscogsTabMatch", linked=False
+    )
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+        crud_window._discogs_filter.setCurrentIndex(2)  # not linked yet
+        assert crud_window._select_discogs_release("990103")
+
+        assert crud_window._discogs_tracks_group.isHidden()
+        assert not crud_window._discogs_suggest_group.isHidden()
+        record_item = crud_window._discogs_suggest_table.item(0, 1)
+        assert record_item is not None
+        assert record_item.text() == str(record_id)
+
+        crud_window._discogs_suggest_table.selectRow(0)
+        crud_window._link_selected_discogs_suggestion()
+
+        assert "Linked release 990103" in crud_window._discogs_status.text()
+        lookup = DiscogsService(context).lookup("990103")
+        assert lookup is not None
+        assert lookup.record is not None
+        assert lookup.record["RecordID"] == record_id
+        # The release left the "not linked yet" list.
+        assert "990103" not in crud_window._discogs_releases
+    finally:
+        _drop_discogs_fixture(context, "990103", artist_id, record_id, song_id)
+
+
+def test_discogs_link_without_a_selection_asks_for_one(
+    window: MainWindow,
+) -> None:
+    window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+    window._link_selected_discogs_suggestion()
+
+    assert "Select a suggested record" in window._discogs_status.text()
+
+
+def test_discogs_double_click_opens_the_linked_record(
+    crud_window: MainWindow,
+) -> None:
+    context = crud_window.context
+    artist_id, record_id, song_id = _make_discogs_fixture(
+        context, "990104", "DiscogsTabOpen", linked=True
+    )
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+        assert crud_window._select_discogs_release("990104")
+        row = crud_window._discogs_table.selectionModel().selectedRows()[0].row()
+
+        crud_window._on_discogs_release_double_clicked(row, 0)
+
+        assert crud_window.main_tabs.currentIndex() == 0
+        assert crud_window.current_table == "Records"
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["RecordID"] == record_id
+    finally:
+        _drop_discogs_fixture(context, "990104", artist_id, record_id, song_id)
+
+
+def test_discogs_double_click_on_unlinked_release_stays_put(
+    crud_window: MainWindow,
+) -> None:
+    context = crud_window.context
+    artist_id, record_id, song_id = _make_discogs_fixture(
+        context, "990105", "DiscogsTabStay", linked=False
+    )
+
+    try:
+        crud_window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+        assert crud_window._select_discogs_release("990105")
+        row = crud_window._discogs_table.selectionModel().selectedRows()[0].row()
+
+        crud_window._on_discogs_release_double_clicked(row, 0)
+
+        assert crud_window.main_tabs.currentIndex() == DISCOGS_TAB_INDEX
+        assert "no record yet" in crud_window._discogs_status.text()
+    finally:
+        _drop_discogs_fixture(context, "990105", artist_id, record_id, song_id)
+
+
+def test_discogs_export_writes_the_visible_releases(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    window.main_tabs.setCurrentIndex(DISCOGS_TAB_INDEX)
+    window._discogs_filter.setCurrentIndex(1)  # linked only
+    export_path = tmp_path / "discogs.csv"
+
+    with patch(
+        "main.QFileDialog.getSaveFileName",
+        return_value=(str(export_path), ""),
+    ):
+        window._export_table_widget(
+            window._discogs_table, "discogs_releases.csv", "Discogs Releases"
+        )
+
+    with open(export_path, newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert len(rows) == window._discogs_table.rowCount()
+    assert "Release ID" in rows[0]
