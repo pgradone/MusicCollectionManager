@@ -19,6 +19,7 @@ No QApplication is created: main()'s Qt pieces are replaced.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -129,3 +130,41 @@ def test_main_runs_startup_tasks_before_the_window_is_created() -> None:
 
     # The backup has to copy a database nothing has opened yet.
     assert order == ["startup", "window"]
+
+
+def test_a_second_start_the_same_day_does_not_take_another_backup(
+    startup_env: dict[str, Path],
+) -> None:
+    app_main.run_startup_tasks()
+    app_main.run_startup_tasks()
+
+    assert len(list(startup_env["backups"].glob("Musi_*.db"))) == 1
+    assert "Today's backup already exists" in read_log(startup_env)
+
+
+def test_a_backup_from_yesterday_does_not_count_as_todays(
+    startup_env: dict[str, Path],
+) -> None:
+    startup_env["backups"].mkdir()
+    yesterday = datetime.now() - timedelta(days=1)
+    (startup_env["backups"] / f"Musi_{yesterday:%Y%m%d}_120000.db").write_bytes(
+        b"yesterday"
+    )
+
+    app_main.run_startup_tasks()
+
+    assert len(list(startup_env["backups"].glob("Musi_*.db"))) == 2
+    assert "Database backed up to" in read_log(startup_env)
+
+
+def test_disabled_backups_are_reported_as_skipped_even_with_a_backup_today(
+    startup_env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_main.run_startup_tasks()
+    monkeypatch.setattr(config, "AUTO_BACKUP", False)
+
+    app_main.run_startup_tasks()
+
+    log_text = read_log(startup_env)
+    assert "Automatic backup skipped (disabled" in log_text
+    assert len(list(startup_env["backups"].glob("Musi_*.db"))) == 1

@@ -52,3 +52,23 @@ def backup_database() -> Path | None:
         backup.unlink()
 
     return destination
+
+
+def todays_backup() -> Path | None:
+    """
+    The newest backup taken today, or None.
+
+    Backup names carry their date (Musi_YYYYMMDD_HHMMSS.db), so this
+    looks at the name rather than the file's modified time, which a
+    restore or a copy can change.
+    """
+
+    if not config.BACKUP_FOLDER.exists():
+
+        return None
+
+    today = datetime.now().strftime("%Y%m%d")
+
+    matches = sorted(config.BACKUP_FOLDER.glob(f"Musi_{today}_*.db"))
+
+    return matches[-1] if matches else None

@@ -14,12 +14,13 @@ folder.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 import config
-from core.backup import backup_database
+from core.backup import backup_database, todays_backup
 
 
 @pytest.fixture()
@@ -128,3 +129,52 @@ def test_backup_prunes_oldest_first(
     assert older.name not in remaining
     assert newer.name in remaining
     assert len(remaining) == 2
+
+# ============================================================
+# todays_backup
+# ============================================================
+
+
+def _stamp(days_ago: int = 0, time: str = "120000") -> str:
+    from datetime import timedelta
+
+    day = datetime.now() - timedelta(days=days_ago)
+    return f"Musi_{day.strftime('%Y%m%d')}_{time}.db"
+
+
+def test_todays_backup_is_none_when_the_folder_does_not_exist(
+    isolated_backup_env: tuple[Path, Path],
+) -> None:
+    assert todays_backup() is None
+
+
+def test_todays_backup_is_none_when_only_older_backups_exist(
+    isolated_backup_env: tuple[Path, Path],
+) -> None:
+    _, backup_folder = isolated_backup_env
+    backup_folder.mkdir()
+    (backup_folder / _stamp(days_ago=1)).write_bytes(b"yesterday")
+    (backup_folder / "Musi_20200101_000000.db").write_bytes(b"old")
+
+    assert todays_backup() is None
+
+
+def test_todays_backup_returns_the_newest_one_from_today(
+    isolated_backup_env: tuple[Path, Path],
+) -> None:
+    _, backup_folder = isolated_backup_env
+    backup_folder.mkdir()
+    (backup_folder / _stamp(time="080000")).write_bytes(b"morning")
+    latest = backup_folder / _stamp(time="170000")
+    latest.write_bytes(b"afternoon")
+
+    assert todays_backup() == latest
+
+
+def test_todays_backup_finds_the_backup_just_taken(
+    isolated_backup_env: tuple[Path, Path],
+) -> None:
+    created = backup_database()
+
+    assert created is not None
+    assert todays_backup() == created

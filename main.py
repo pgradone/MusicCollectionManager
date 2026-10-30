@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 import config
-from core.backup import backup_database
+from core.backup import backup_database, todays_backup
 from core.context import DatabaseContext
 from core.database import ConnectionError, DatabaseError, DatabaseManager, QueryError
 from core.export import export_to_csv, export_to_excel, export_to_pdf
@@ -2406,7 +2406,7 @@ class MainWindow(QMainWindow):
 
 def run_startup_tasks() -> None:
     """
-    Start logging and take the automatic backup.
+    Start logging and take the automatic backup (at most one a day).
 
     Runs before the window (and so the database connection) exists,
     so the backup copies a database nothing has open. A failed
@@ -2414,6 +2414,16 @@ def run_startup_tasks() -> None:
     """
 
     initialise_logger()
+
+    # One backup per day is enough: with MAX_BACKUPS of 30 that keeps
+    # thirty days of history instead of thirty launches' worth.
+    existing = todays_backup() if config.AUTO_BACKUP else None
+    if existing is not None:
+        logger.info(
+            "Today's backup already exists (%s); not taking another.",
+            existing.name,
+        )
+        return
 
     try:
         backup = backup_database()
