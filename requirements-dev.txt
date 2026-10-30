@@ -1,0 +1,11 @@
+# Everything needed to run the application AND its test suite.
+#
+#   pip install -r requirements-dev.txt
+#   python -m pytest -q
+#
+# (Running the application alone only needs requirements.txt.)
+
+-r requirements.txt
+
+pytest>=8.0
+pytest-cov>=5.0
