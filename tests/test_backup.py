@@ -52,7 +52,7 @@ def test_backup_disabled_creates_nothing(
     _, backup_folder = isolated_backup_env
     monkeypatch.setattr(config, "AUTO_BACKUP", False)
 
-    backup_database()
+    assert backup_database() is None
 
     assert not backup_folder.exists()
 
@@ -67,7 +67,7 @@ def test_backup_skipped_when_database_missing(
     monkeypatch.setattr(config, "BACKUP_FOLDER", backup_folder)
     monkeypatch.setattr(config, "AUTO_BACKUP", True)
 
-    backup_database()
+    assert backup_database() is None
 
     assert not any(backup_folder.glob("Musi_*.db"))
 
@@ -77,11 +77,12 @@ def test_backup_creates_timestamped_copy(
 ) -> None:
     database_file, backup_folder = isolated_backup_env
 
-    backup_database()
+    created = backup_database()
 
     backups = list(backup_folder.glob("Musi_*.db"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == database_file.read_bytes()
+    assert created == backups[0]
 
 
 def test_backup_keeps_only_max_backups(

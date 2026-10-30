@@ -39,9 +39,11 @@ from PySide6.QtWidgets import (
 )
 
 import config
+from core.backup import backup_database
 from core.context import DatabaseContext
 from core.database import ConnectionError, DatabaseError, DatabaseManager, QueryError
 from core.export import export_to_csv, export_to_excel, export_to_pdf
+from core.logger import initialise_logger
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
@@ -2402,8 +2404,31 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def run_startup_tasks() -> None:
+    """
+    Start logging and take the automatic backup.
+
+    Runs before the window (and so the database connection) exists,
+    so the backup copies a database nothing has open. A failed
+    backup is logged and never stops the application starting.
+    """
+
+    initialise_logger()
+
+    try:
+        backup = backup_database()
+    except OSError as exc:
+        logger.warning("Automatic backup failed: %s", exc)
+        return
+
+    if backup is None:
+        logger.info("Automatic backup skipped (disabled or no database yet).")
+    else:
+        logger.info("Database backed up to %s", backup.name)
+
+
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+    run_startup_tasks()
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
