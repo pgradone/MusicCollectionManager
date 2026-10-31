@@ -71,7 +71,11 @@ The database can therefore reject a relationship that refers to a nonexistent re
 
 ## 7. Backups
 
-Before substantial maintenance or bulk changes:
+The application protects the database for you. The first time you start it each day, it copies the database into the `backups` folder, named `Musi_<date>_<time>.db`, and keeps the newest 30 (about a month of history). Starting it again the same day does not make another copy. What the application does is recorded in `logs/music_collection.log`.
+
+To go back to an earlier state: close the application, keep a copy of the current `Musi.db`, then copy the backup you want over it under the name `Musi.db`.
+
+A day's backup is the database as it was at the first start of that day, so before substantial maintenance or bulk changes also make your own copy:
 
 1. Close the application.
 2. Copy the database file.
@@ -111,6 +115,20 @@ Avoid manually editing SQLite first. Investigate the application behavior and da
 
 **SQLite** — The database technology used to store the collection.
 
-## 10. Summary
+## 10. Keyboard Shortcuts
+
+| Keys | What it does |
+| --- | --- |
+| Ctrl+1 to Ctrl+5 | Go to Browse, Dashboard, Reports, Search or Discogs |
+| Ctrl+F | Jump to the search or filter box of the current tab (Browse, Search, Discogs) |
+| F5 | Reload what the current tab shows |
+| Ctrl+E | Export the rows shown on the current tab to CSV, Excel or PDF |
+| Ctrl+N | Start a new record (Browse) |
+| Ctrl+S | Save the record being edited (Browse) |
+| Alt+Up / Alt+Down | Move the selected rows of a Program's Schedule up or down |
+
+Hovering over a tab or button shows its shortcut. There is deliberately no shortcut for deleting a record: deleting happens immediately, so it is only available with the Delete button.
+
+## 11. Summary
 
 MusicCollectionManager is a connected model of a music collection. Artists, songs, records, styles, programs, and schedules are structured data, while their associations are represented explicitly so the collection can remain consistent as it grows.

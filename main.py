@@ -4,12 +4,13 @@ import logging
 import re
 import sqlite3
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
 
 from PySide6.QtCore import QDate, QEvent, QObject, Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -331,6 +332,7 @@ class MainWindow(QMainWindow):
 
         container = QWidget(self)
         container.setLayout(main_layout)
+        self._browse_widget = container
 
         self.main_tabs = QTabWidget()
         self.main_tabs.addTab(container, "Browse")
@@ -341,6 +343,7 @@ class MainWindow(QMainWindow):
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
 
         self.setCentralWidget(self.main_tabs)
+        self._install_shortcuts()
 
         self.refresh_database()
 
@@ -740,15 +743,15 @@ class MainWindow(QMainWindow):
         refresh_btn.clicked.connect(self._run_selected_report)
         controls.addWidget(refresh_btn)
 
-        export_btn = QPushButton("Export")
-        export_btn.clicked.connect(
+        self._reports_export_button = QPushButton("Export")
+        self._reports_export_button.clicked.connect(
             lambda: self._export_table_widget(
                 self._report_table,
                 "report.csv",
                 self._report_combo.currentText() or "Report",
             )
         )
-        controls.addWidget(export_btn)
+        controls.addWidget(self._reports_export_button)
         layout.addLayout(controls)
 
         self._report_combo.currentIndexChanged.connect(self._run_selected_report)
@@ -873,6 +876,7 @@ class MainWindow(QMainWindow):
 
     def _build_search_tab(self) -> QWidget:
         widget = QWidget()
+        self._search_widget = widget
         layout = QVBoxLayout(widget)
 
         controls = QHBoxLayout()
@@ -888,13 +892,13 @@ class MainWindow(QMainWindow):
         search_btn.clicked.connect(self._run_global_search)
         controls.addWidget(search_btn)
 
-        export_btn = QPushButton("Export")
-        export_btn.clicked.connect(
+        self._search_export_button = QPushButton("Export")
+        self._search_export_button.clicked.connect(
             lambda: self._export_table_widget(
                 self._search_table, "search_results.csv", "Search Results"
             )
         )
-        controls.addWidget(export_btn)
+        controls.addWidget(self._search_export_button)
         layout.addLayout(controls)
 
         self._search_summary_label = QLabel(
@@ -992,13 +996,13 @@ class MainWindow(QMainWindow):
         import_btn.clicked.connect(self._import_discogs_export)
         controls.addWidget(import_btn)
 
-        export_btn = QPushButton("Export")
-        export_btn.clicked.connect(
+        self._discogs_export_button = QPushButton("Export")
+        self._discogs_export_button.clicked.connect(
             lambda: self._export_table_widget(
                 self._discogs_table, "discogs_releases.csv", "Discogs Releases"
             )
         )
-        controls.addWidget(export_btn)
+        controls.addWidget(self._discogs_export_button)
         layout.addLayout(controls)
 
         self._discogs_status = QLabel("")
@@ -1373,6 +1377,124 @@ class MainWindow(QMainWindow):
         self._discogs_status.setText(
             f"Linked release {release_id} to record {record_text}."
         )
+
+    # ========================================================
+    # Keyboard shortcuts
+    # ========================================================
+    #
+    # Shortcuts act through the same buttons and handlers the mouse
+    # uses, so the two can never behave differently. There is
+    # deliberately no Delete-key shortcut: delete_record() removes the
+    # selected record straight away, with no confirmation.
+
+    def _install_shortcuts(self) -> None:
+        self._shortcuts: dict[str, QShortcut] = {}
+
+        def add(key: str, handler: Callable[[], None]) -> None:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.activated.connect(handler)
+            self._shortcuts[key] = shortcut
+
+        for index in range(self.main_tabs.count()):
+            key = f"Ctrl+{index + 1}"
+            add(key, lambda i=index: self.main_tabs.setCurrentIndex(i))
+            self.main_tabs.setTabToolTip(index, key)
+
+        add("Ctrl+F", self._shortcut_find)
+        add("F5", self._shortcut_refresh)
+        add("Ctrl+E", self._shortcut_export)
+        add("Ctrl+N", self._shortcut_new)
+        add("Ctrl+S", self._shortcut_save)
+        add("Alt+Up", lambda: self._shortcut_move_schedule("Move Up"))
+        add("Alt+Down", lambda: self._shortcut_move_schedule("Move Down"))
+
+        self.refresh_button.setToolTip("Reload the data (F5)")
+        self.new_button.setToolTip("Start a new record (Ctrl+N)")
+        self.save_button.setToolTip("Save the record (Ctrl+S)")
+        self.browse_export_button.setToolTip("Export the rows shown (Ctrl+E)")
+        self.search_box.setToolTip("Filter the rows shown (Ctrl+F)")
+
+    def _on_browse_tab(self) -> bool:
+        return self.main_tabs.currentWidget() is self._browse_widget
+
+    def _shortcut_find(self) -> None:
+        """Ctrl+F: jump to the current tab's search / lookup box."""
+
+        current = self.main_tabs.currentWidget()
+
+        if current is self._browse_widget:
+            box = self.search_box
+        elif current is self._search_widget:
+            box = self._global_search_box
+        elif current is self._discogs_widget:
+            box = self._discogs_id_box
+        else:
+            return
+
+        box.setFocus()
+        box.selectAll()
+
+    def _shortcut_refresh(self) -> None:
+        """F5: reload whatever the current tab shows."""
+
+        current = self.main_tabs.currentWidget()
+
+        if current is self._browse_widget:
+            self.refresh_database()
+        elif current is self._dashboard_widget:
+            self._refresh_dashboard()
+        elif current is self._reports_widget:
+            self._run_selected_report()
+        elif current is self._search_widget:
+            self._run_global_search()
+        elif current is self._discogs_widget:
+            self._refresh_discogs()
+
+    def _shortcut_export(self) -> None:
+        """Ctrl+E: press the current tab's Export button (Dashboard has none)."""
+
+        current = self.main_tabs.currentWidget()
+
+        if current is self._browse_widget:
+            self.browse_export_button.click()
+        elif current is self._reports_widget:
+            self._reports_export_button.click()
+        elif current is self._search_widget:
+            self._search_export_button.click()
+        elif current is self._discogs_widget:
+            self._discogs_export_button.click()
+
+    def _shortcut_new(self) -> None:
+        """Ctrl+N: start a new record (Browse tab only)."""
+
+        if self._on_browse_tab():
+            self.new_button.click()
+
+    def _shortcut_save(self) -> None:
+        """Ctrl+S: save the record being edited (Browse tab only)."""
+
+        if self._on_browse_tab():
+            self.save_button.click()
+
+    def _shortcut_move_schedule(self, button_text: str) -> None:
+        """
+        Alt+Up / Alt+Down: press Move Up / Move Down in the related
+        tab that is showing (the Schedule of a Program). Does nothing
+        when that tab has no such button.
+        """
+
+        if not self._on_browse_tab():
+            return
+
+        tab = self.related_tabs.currentWidget()
+
+        if tab is None:
+            return
+
+        for button in tab.findChildren(QPushButton):
+            if button.text() == button_text:
+                button.click()
+                return
 
     # ========================================================
     # Export (shared by Browse, Reports, and Search)

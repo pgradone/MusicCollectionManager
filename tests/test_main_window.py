@@ -32,6 +32,8 @@ import pytest
 from openpyxl import load_workbook
 from pypdf import PdfReader
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -1724,3 +1726,247 @@ def test_discogs_import_up_to_date_file_needs_no_confirmation(
         assert "Nothing to import" in crud_window._discogs_status.text()
     finally:
         _drop_plain_releases(context, "990404")
+
+
+# ============================================================
+# Keyboard shortcuts (Milestone 6D (1/N))
+# ============================================================
+#
+# Two styles of test. Tests using shown_window send REAL key presses
+# to a shown, active window, which proves the key combinations
+# themselves work. The others call a shortcut's activated signal,
+# which is the same code path without needing window focus.
+
+EXPECTED_SHORTCUTS = {
+    "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
+    "Ctrl+F", "F5", "Ctrl+E", "Ctrl+N", "Ctrl+S", "Alt+Up", "Alt+Down",
+}
+
+
+@pytest.fixture()
+def shown_window(window: MainWindow) -> Iterator[MainWindow]:
+    window.show()
+    window.activateWindow()
+    QApplication.processEvents()
+    try:
+        yield window
+    finally:
+        window.hide()
+
+
+def _press(window: MainWindow, key: str) -> None:
+    """Send a real key press such as 'Ctrl+3' or 'F5' to the window."""
+
+    *modifier_names, key_name = key.split("+")
+    modifier_flags = {
+        "Ctrl": Qt.KeyboardModifier.ControlModifier,
+        "Alt": Qt.KeyboardModifier.AltModifier,
+        "Shift": Qt.KeyboardModifier.ShiftModifier,
+    }
+
+    modifiers = Qt.KeyboardModifier.NoModifier
+    for name in modifier_names:
+        modifiers |= modifier_flags[name]
+
+    QTest.keyClick(window, getattr(Qt.Key, f"Key_{key_name}"), modifiers)
+    QApplication.processEvents()
+
+
+def _trigger(window: MainWindow, key: str) -> None:
+    window._shortcuts[key].activated.emit()
+
+
+def test_all_expected_shortcuts_are_registered(window: MainWindow) -> None:
+    assert set(window._shortcuts) == EXPECTED_SHORTCUTS
+
+    for key, shortcut in window._shortcuts.items():
+        assert isinstance(shortcut, QShortcut)
+        assert shortcut.key() == QKeySequence(key)
+
+
+def test_tabs_show_their_shortcut_as_a_tooltip(window: MainWindow) -> None:
+    assert [
+        window.main_tabs.tabToolTip(i) for i in range(window.main_tabs.count())
+    ] == ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5"]
+
+
+@pytest.mark.parametrize("number", [1, 2, 3, 4, 5])
+def test_ctrl_number_switches_tab_with_a_real_key_press(
+    shown_window: MainWindow, number: int
+) -> None:
+    other = 0 if number != 1 else 1
+    shown_window.main_tabs.setCurrentIndex(other)
+
+    _press(shown_window, f"Ctrl+{number}")
+
+    assert shown_window.main_tabs.currentIndex() == number - 1
+
+
+def test_ctrl_f_focuses_the_search_box_of_the_current_tab(
+    shown_window: MainWindow,
+) -> None:
+    for tab_index, box_name in [
+        (0, "search_box"),
+        (3, "_global_search_box"),
+        (4, "_discogs_id_box"),
+    ]:
+        shown_window.main_tabs.setCurrentIndex(tab_index)
+        _press(shown_window, "Ctrl+F")
+
+        assert getattr(shown_window, box_name).hasFocus(), box_name
+
+
+def test_ctrl_f_on_the_dashboard_does_nothing(window: MainWindow) -> None:
+    window.main_tabs.setCurrentIndex(1)
+
+    with patch.object(window.search_box, "setFocus") as browse_focus:
+        _trigger(window, "Ctrl+F")
+
+    browse_focus.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("tab_index", "method_name"),
+    [
+        (0, "refresh_database"),
+        (1, "_refresh_dashboard"),
+        (2, "_run_selected_report"),
+        (3, "_run_global_search"),
+        (4, "_refresh_discogs"),
+    ],
+)
+def test_f5_refreshes_whatever_the_current_tab_shows(
+    window: MainWindow, tab_index: int, method_name: str
+) -> None:
+    window.main_tabs.setCurrentIndex(tab_index)
+
+    with patch.object(window, method_name) as refresh:
+        _trigger(window, "F5")
+
+    refresh.assert_called_once()
+
+
+def test_ctrl_e_exports_the_rows_of_the_current_tab(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    window.load_table_data("Styles")
+    export_path = tmp_path / "styles.csv"
+
+    with patch(
+        "main.QFileDialog.getSaveFileName",
+        return_value=(str(export_path), ""),
+    ):
+        _trigger(window, "Ctrl+E")
+
+    with open(export_path, newline="", encoding="utf-8") as handle:
+        assert len(list(csv.DictReader(handle))) == len(window.table_rows)
+
+
+def test_ctrl_e_on_the_dashboard_has_nothing_to_export(
+    window: MainWindow,
+) -> None:
+    window.main_tabs.setCurrentIndex(1)
+
+    with patch("main.QFileDialog.getSaveFileName") as dialog:
+        _trigger(window, "Ctrl+E")
+
+    dialog.assert_not_called()
+
+
+def test_ctrl_n_starts_a_new_record(window: MainWindow) -> None:
+    window.load_table_data("Artists")
+    window.table_widget.selectRow(0)
+    assert window.current_row is not None
+
+    _trigger(window, "Ctrl+N")
+
+    assert window.current_row is None
+    assert "New row ready" in window.message_label.text()
+
+
+def test_ctrl_s_saves_the_record_being_edited(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzShortcutSave"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        row_idx = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["ArtistID"] == artist_id
+        )
+        crud_window.table_widget.selectRow(row_idx)
+        _set_form_field_text(crud_window, "Surname", "ZzzShortcutSaved")
+
+        _trigger(crud_window, "Ctrl+S")
+
+        assert artists.require(artist_id)["Surname"] == "ZzzShortcutSaved"
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+@pytest.mark.parametrize("key", ["Ctrl+S", "Ctrl+N"])
+def test_save_and_new_do_nothing_outside_the_browse_tab(
+    window: MainWindow, key: str
+) -> None:
+    window.main_tabs.setCurrentIndex(2)  # Reports
+
+    with patch.object(window.save_button, "click") as save, patch.object(
+        window.new_button, "click"
+    ) as new:
+        _trigger(window, key)
+
+    save.assert_not_called()
+    new.assert_not_called()
+
+
+def test_alt_down_and_alt_up_move_the_selected_schedule_row(
+    crud_window: MainWindow,
+) -> None:
+    programs_repo = repository_for(crud_window.context, "Programs")
+    songs = repository_for(crud_window.context, "Songs")
+    song_a, song_b = songs.all(limit=2)
+    program_id = programs_repo.insert(
+        {"ProgName": "ShortcutMoveUITest"}, commit=True
+    )
+    program_service = ProgramService(crud_window.context)
+    program_service.add_song(program_id, 1.0, song_id=song_a["SongID"])
+    program_service.add_song(program_id, 2.0, song_id=song_b["SongID"])
+
+    def positions() -> dict[int, float]:
+        return {
+            entry["SongID"]: entry["Position"]
+            for entry in program_service.schedule_for_program(program_id)
+        }
+
+    try:
+        table_widget = _schedule_table_widget(crud_window, program_id)
+        table_widget.selectRow(0)  # song_a at position 1
+
+        _trigger(crud_window, "Alt+Down")
+
+        assert positions() == {song_a["SongID"]: 2.0, song_b["SongID"]: 1.0}
+
+        # The selection followed the moved row, so Alt+Up undoes it
+        # without selecting anything again.
+        _trigger(crud_window, "Alt+Up")
+
+        assert positions() == {song_a["SongID"]: 1.0, song_b["SongID"]: 2.0}
+    finally:
+        for entry in program_service.schedule_for_program(program_id):
+            program_service.remove_song(program_id, entry["Position"])
+        programs_repo.delete(program_id, commit=True)
+
+
+def test_alt_arrows_do_nothing_when_the_tab_has_no_move_buttons(
+    window: MainWindow,
+) -> None:
+    window.load_table_data("Artists")
+    window.table_widget.selectRow(0)
+
+    _trigger(window, "Alt+Up")  # must simply do nothing
+    _trigger(window, "Alt+Down")
+
+    assert window.main_tabs.currentIndex() == 0
