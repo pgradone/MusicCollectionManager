@@ -17,6 +17,8 @@ LOG_FOLDER = ROOT_DIR / "logs"
 
 EXPORT_FOLDER = ROOT_DIR / "exports"
 
+ARTWORK_FOLDER = ROOT_DIR / "artwork"
+
 RESOURCE_FOLDER = ROOT_DIR / "resources"
 
 ICON_FOLDER = RESOURCE_FOLDER / "icons"

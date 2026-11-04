@@ -26,13 +26,14 @@ import csv
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from openpyxl import load_workbook
+from PIL import Image
 from pypdf import PdfReader
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+from PySide6.QtGui import QDropEvent, QKeySequence, QShortcut
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -44,9 +45,11 @@ from PySide6.QtWidgets import (
     QTableWidget,
 )
 
+import config
 from core.relationship_operations import link, list_related, unlink
 from core.relationships import JUNCTION, discover_relationships
 from main import REPORT_DEFINITIONS, SOFT_FOREIGN_KEYS, MainWindow
+from services.artwork_service import ArtworkService
 from services.discogs_service import DiscogsService
 from services.program_service import ProgramService
 from services.record_service import RecordService
@@ -80,6 +83,23 @@ def window(qapp: QApplication) -> MainWindow:
     """Provide a constructed MainWindow, connected to the real database."""
 
     return MainWindow()
+
+
+@pytest.fixture(autouse=True)
+def isolated_artwork_folder(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """
+    Point the artwork folder at a throwaway directory for EVERY test
+    here. Window tests create and delete records, and record IDs in
+    the test database overlap real ones: without this, deleting a
+    test record could delete the cover of a real record that happens
+    to have the same ID.
+    """
+
+    folder = tmp_path_factory.mktemp("artwork")
+    monkeypatch.setattr(config, "ARTWORK_FOLDER", folder)
+    return folder
 
 
 @pytest.fixture()
@@ -753,7 +773,11 @@ def test_delete_record_removes_row(crud_window: MainWindow) -> None:
     )
     crud_window.table_widget.selectRow(row_idx)
 
-    crud_window.delete_record()
+    with patch(
+        "main.QMessageBox.question",
+        return_value=QMessageBox.StandardButton.Yes,
+    ):
+        crud_window.delete_record()
 
     assert artists.get(artist_id) is None
 
@@ -1740,6 +1764,7 @@ def test_discogs_import_up_to_date_file_needs_no_confirmation(
 EXPECTED_SHORTCUTS = {
     "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
     "Ctrl+F", "F5", "Ctrl+E", "Ctrl+N", "Ctrl+S", "Alt+Up", "Alt+Down",
+    "Delete",
 }
 
 
@@ -1970,3 +1995,407 @@ def test_alt_arrows_do_nothing_when_the_tab_has_no_move_buttons(
     _trigger(window, "Alt+Down")
 
     assert window.main_tabs.currentIndex() == 0
+
+
+# ============================================================
+# Delete with confirmation, and the Delete key (Milestone 6D (2/N))
+# ============================================================
+
+
+def _artist_row(window: MainWindow, artist_id: int) -> int:
+    return next(
+        r
+        for r in range(len(window.table_rows))
+        if window.table_rows[r]["ArtistID"] == artist_id
+    )
+
+
+def test_delete_key_only_works_while_the_record_list_has_focus(
+    window: MainWindow,
+) -> None:
+    shortcut = window._shortcuts["Delete"]
+
+    assert shortcut.context() == Qt.ShortcutContext.WidgetShortcut
+    assert shortcut.parent() is window.table_widget
+
+
+def test_declining_the_confirmation_keeps_the_record(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzDeleteDeclined"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ):
+            crud_window.delete_button.click()
+
+        assert artists.get(artist_id) is not None
+        assert crud_window.message_label.text() == "Delete cancelled."
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_confirmation_names_the_record_being_deleted(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert(
+        {"Surname": "ZzzDeleteNamed", "Name": " "}, commit=True
+    )
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ) as question:
+            crud_window.delete_record()
+
+        text = question.call_args[0][2]
+        assert f"Artists #{artist_id} (ZzzDeleteNamed)" in text
+        assert "cannot be undone" in text
+        # The safe answer is the default.
+        assert question.call_args[0][4] == QMessageBox.StandardButton.No
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_delete_key_on_the_record_list_deletes_after_confirming(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzDeleteKey"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.show()
+        crud_window.activateWindow()
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        crud_window.table_widget.setFocus()
+        QApplication.processEvents()
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ) as question:
+            QTest.keyClick(crud_window.table_widget, Qt.Key.Key_Delete)
+            QApplication.processEvents()
+
+        question.assert_called_once()
+        assert artists.get(artist_id) is None
+    finally:
+        crud_window.hide()
+        artists.delete(artist_id, commit=True)
+
+
+def test_delete_key_in_a_text_box_does_not_delete_the_record(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzDeleteTyping"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.show()
+        crud_window.activateWindow()
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        crud_window.search_box.setFocus()
+        QApplication.processEvents()
+
+        with patch("main.QMessageBox.question") as question:
+            QTest.keyClick(crud_window.search_box, Qt.Key.Key_Delete)
+            QApplication.processEvents()
+
+        question.assert_not_called()
+        assert artists.get(artist_id) is not None
+    finally:
+        crud_window.hide()
+        artists.delete(artist_id, commit=True)
+
+
+# ============================================================
+# Cover artwork (Milestone 7A (2/N))
+# ============================================================
+
+
+def _picture(directory: Path, name: str = "cover.png", size=(300, 200)) -> Path:
+    path = directory / name
+    Image.new("RGB", size, (30, 90, 200)).save(path)
+    return path
+
+
+def _new_record(context: Any, title: str) -> int:
+    return RecordService(context).create(title=title)
+
+
+def _select_record(window: MainWindow, record_id: int) -> None:
+    window.load_table_data("Records")
+    row = next(
+        r
+        for r in range(len(window.table_rows))
+        if window.table_rows[r]["RecordID"] == record_id
+    )
+    window.table_widget.selectRow(row)
+
+
+def test_cover_panel_shows_only_for_a_selected_record(
+    window: MainWindow,
+) -> None:
+    _select_table_via_combo(window, "Records")
+    assert not window.cover_group.isHidden()
+
+    window.start_new_record()  # nothing saved yet, so no ID to attach to
+    assert window.cover_group.isHidden()
+
+    _select_table_via_combo(window, "Artists")
+    assert window.cover_group.isHidden()
+
+
+def test_choosing_an_image_sets_and_shows_the_cover(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverChoose")
+
+    try:
+        _select_record(crud_window, record_id)
+        assert not crud_window.cover_remove_button.isEnabled()
+        assert ArtworkService().get(record_id) is None
+
+        with patch(
+            "main.QFileDialog.getOpenFileName",
+            return_value=(str(_picture(tmp_path)), ""),
+        ):
+            crud_window.cover_choose_button.click()
+
+        stored = ArtworkService().get(record_id)
+        assert stored is not None
+        pixmap = crud_window.cover_label.pixmap()
+        assert not pixmap.isNull()
+        assert pixmap.width() <= crud_window.cover_label.width()
+        assert crud_window.cover_remove_button.isEnabled()
+        assert crud_window.message_label.text() == "Cover updated."
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_cancelling_the_file_dialog_changes_nothing(
+    crud_window: MainWindow,
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverCancel")
+
+    try:
+        _select_record(crud_window, record_id)
+
+        with patch("main.QFileDialog.getOpenFileName", return_value=("", "")):
+            crud_window.cover_choose_button.click()
+
+        assert ArtworkService().get(record_id) is None
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_a_file_that_is_not_an_image_is_reported_not_stored(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverBad")
+    bad = tmp_path / "notes.txt"
+    bad.write_text("not a picture", encoding="utf-8")
+
+    try:
+        _select_record(crud_window, record_id)
+
+        with patch(
+            "main.QFileDialog.getOpenFileName", return_value=(str(bad), "")
+        ), patch("main.QMessageBox.warning") as warning:
+            crud_window.cover_choose_button.click()
+
+        warning.assert_not_called()  # reported in the status line instead
+        assert "Cover not changed" in crud_window.message_label.text()
+        assert "notes.txt" in crud_window.message_label.text()
+        assert ArtworkService().get(record_id) is None
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_removing_the_cover_asks_first(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverRemove")
+    ArtworkService().set_image(record_id, _picture(tmp_path))
+
+    try:
+        _select_record(crud_window, record_id)
+        assert crud_window.cover_remove_button.isEnabled()
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ) as question:
+            crud_window.cover_remove_button.click()
+
+        assert ArtworkService().get(record_id) is not None
+        text = question.call_args[0][2]
+        assert f"Records #{record_id} (ZzzCoverRemove)" in text
+        assert question.call_args[0][4] == QMessageBox.StandardButton.No
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            crud_window.cover_remove_button.click()
+
+        assert ArtworkService().get(record_id) is None
+        assert crud_window.message_label.text() == "Cover removed."
+        assert not crud_window.cover_remove_button.isEnabled()
+        assert crud_window.cover_label.pixmap().isNull()
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_the_panel_follows_the_selected_record(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    with_cover = _new_record(crud_window.context, "ZzzCoverHas")
+    without_cover = _new_record(crud_window.context, "ZzzCoverHasNot")
+    ArtworkService().set_image(with_cover, _picture(tmp_path))
+
+    try:
+        _select_record(crud_window, with_cover)
+        assert not crud_window.cover_label.pixmap().isNull()
+
+        _select_record(crud_window, without_cover)
+        assert crud_window.cover_label.pixmap().isNull()
+        assert "No cover" in crud_window.cover_label.text()
+    finally:
+        RecordService(crud_window.context).delete(with_cover)
+        RecordService(crud_window.context).delete(without_cover)
+
+
+def _drop_event(mime: QMimeData) -> QDropEvent:
+    return QDropEvent(
+        QPointF(10, 10),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_dropping_an_image_file_on_the_cover_sets_it(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverDrop")
+    picture = _picture(tmp_path, "dropped.png")
+
+    try:
+        _select_record(crud_window, record_id)
+
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(picture))])
+        event = _drop_event(mime)
+        crud_window.cover_label.dropEvent(event)
+
+        assert event.isAccepted()
+        assert ArtworkService().get(record_id) is not None
+        assert not crud_window.cover_label.pixmap().isNull()
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_dropping_something_that_is_not_a_file_is_ignored(
+    crud_window: MainWindow,
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverDropText")
+
+    try:
+        _select_record(crud_window, record_id)
+
+        mime = QMimeData()
+        mime.setText("just some text")
+        event = _drop_event(mime)
+        event.accept()
+        crud_window.cover_label.dropEvent(event)
+
+        assert not event.isAccepted()
+        assert ArtworkService().get(record_id) is None
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_only_file_drags_are_welcomed_over_the_cover(
+    window: MainWindow, tmp_path: Path
+) -> None:
+    # A stand-in event: Qt's own QDragEnterEvent constructor is
+    # deprecated in this PySide6 release, and all this checks is what
+    # the label does with the event it is handed.
+    def enter(mime: QMimeData) -> tuple[bool, bool]:
+        event = MagicMock()
+        event.mimeData.return_value = mime
+        window.cover_label.dragEnterEvent(event)
+        return event.acceptProposedAction.called, event.ignore.called
+
+    files = QMimeData()
+    files.setUrls([QUrl.fromLocalFile(str(_picture(tmp_path)))])
+    text = QMimeData()
+    text.setText("hello")
+    web = QMimeData()
+    web.setUrls([QUrl("https://example.com/cover.png")])
+
+    assert enter(files) == (True, False)
+    assert enter(text) == (False, True)
+    assert enter(web) == (False, True)  # only files on this computer
+
+
+def test_deleting_a_record_deletes_its_cover(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzCoverDelete")
+    ArtworkService().set_image(record_id, _picture(tmp_path))
+
+    _select_record(crud_window, record_id)
+
+    with patch(
+        "main.QMessageBox.question",
+        return_value=QMessageBox.StandardButton.Yes,
+    ):
+        crud_window.delete_button.click()
+
+    assert ArtworkService().get(record_id) is None
+
+
+def test_deleting_a_row_of_another_table_leaves_covers_alone(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzCoverArtist"}, commit=True)
+    # A cover filed under the same number as the artist, belonging to
+    # whichever record has that ID: deleting the ARTIST must not touch it.
+    ArtworkService().set_image(artist_id, _picture(tmp_path))
+
+    try:
+        crud_window.load_table_data("Artists")
+        row = next(
+            r
+            for r in range(len(crud_window.table_rows))
+            if crud_window.table_rows[r]["ArtistID"] == artist_id
+        )
+        crud_window.table_widget.selectRow(row)
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            crud_window.delete_button.click()
+
+        assert artists.get(artist_id) is None
+        assert ArtworkService().get(artist_id) is not None
+    finally:
+        artists.delete(artist_id, commit=True)

@@ -9,8 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
 
-from PySide6.QtCore import QDate, QEvent, QObject, Qt
-from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
+from PySide6.QtCore import QDate, QEvent, QMimeData, QObject, Qt, Signal
+from PySide6.QtGui import (
+    QCloseEvent,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -19,6 +26,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QDialog,
     QDialogButtonBox,
     QGroupBox,
@@ -48,6 +56,7 @@ from core.logger import initialise_logger
 from core.relationship_operations import RelationshipError, link, list_related, reorder, unlink
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
+from services.artwork_service import ArtworkError, ArtworkService
 from services.discogs_import import DiscogsImporter, DiscogsImportError
 from services.discogs_service import DiscogsService
 from services.program_service import ProgramService, ProgramValidationError
@@ -222,6 +231,53 @@ _DISCOGS_COLUMNS: list[tuple[str, str]] = [
 ]
 
 
+class ArtworkLabel(QLabel):
+    """
+    The picture area of the Cover panel. Besides showing the image it
+    accepts an image file dragged onto it from the file explorer and
+    reports its path through imageDropped; what to do with the file
+    is up to the window.
+    """
+
+    imageDropped = Signal(str)
+
+    SIDE = 200
+
+    def __init__(self) -> None:
+        super().__init__("No cover")
+        self.setFixedSize(self.SIDE, self.SIDE)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setAcceptDrops(True)
+
+    @staticmethod
+    def _dropped_file(mime: QMimeData) -> str | None:
+        if not mime.hasUrls():
+            return None
+
+        for url in mime.urls():
+            if url.isLocalFile():
+                return url.toLocalFile()
+
+        return None
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._dropped_file(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        path = self._dropped_file(event.mimeData())
+
+        if path is None:
+            event.ignore()
+            return
+
+        event.acceptProposedAction()
+        self.imageDropped.emit(path)
+
+
 class MainWindow(QMainWindow):
     """Starter CRUD dashboard for the main database tables."""
 
@@ -317,7 +373,33 @@ class MainWindow(QMainWindow):
 
         side_panel = QWidget()
         side_layout = QVBoxLayout(side_panel)
-        side_layout.addWidget(self.form_group)
+        self.cover_group = QGroupBox("Cover")
+        cover_layout = QVBoxLayout(self.cover_group)
+        self.cover_label = ArtworkLabel()
+        self.cover_label.imageDropped.connect(self._on_cover_dropped)
+        cover_layout.addWidget(
+            self.cover_label, alignment=Qt.AlignmentFlag.AlignHCenter
+        )
+        self.cover_choose_button = QPushButton("Choose image...")
+        self.cover_choose_button.setToolTip(
+            "Pick a picture file, or drag one onto the cover area"
+        )
+        self.cover_choose_button.clicked.connect(self._choose_cover)
+        self.cover_remove_button = QPushButton("Remove image")
+        self.cover_remove_button.clicked.connect(self._remove_cover)
+        cover_layout.addWidget(self.cover_choose_button)
+        cover_layout.addWidget(self.cover_remove_button)
+        self.cover_group.setVisible(False)
+
+        # The cover sits beside the record details rather than under
+        # them, so the related-record tabs below keep their height.
+        details_row = QHBoxLayout()
+        details_row.addWidget(self.form_group, 1)
+        details_row.addWidget(
+            self.cover_group, 0, Qt.AlignmentFlag.AlignTop
+        )
+        side_layout.addLayout(details_row)
+
         side_layout.addWidget(self.related_tabs, 1)
 
         splitter.addWidget(side_panel)
@@ -1379,19 +1461,137 @@ class MainWindow(QMainWindow):
         )
 
     # ========================================================
+    # Cover (artwork) of the selected record
+    # ========================================================
+
+    def _current_record_id(self) -> int | None:
+        """The selected record's ID, only when a Records row is selected."""
+
+        if self.current_table != "Records" or self.current_row is None:
+            return None
+
+        primary_key = self.db.primary_key("Records")
+        value = self.current_row.get(primary_key) if primary_key else None
+
+        return value if isinstance(value, int) else None
+
+    def _update_cover_panel(self) -> None:
+        record_id = self._current_record_id()
+        self.cover_group.setVisible(record_id is not None)
+
+        if record_id is None:
+            return
+
+        self.cover_label.clear()
+        path = ArtworkService().get(record_id)
+        pixmap = QPixmap()
+
+        if path is not None:
+            try:
+                # Read the bytes rather than QPixmap(path), so a cover
+                # that was just replaced is never served from a cache.
+                loaded = pixmap.loadFromData(path.read_bytes())
+            except OSError:
+                loaded = False
+        else:
+            loaded = False
+
+        if loaded:
+            self.cover_label.setPixmap(
+                pixmap.scaled(
+                    self.cover_label.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        elif path is not None:
+            self.cover_label.setText("The cover file\ncannot be read")
+        else:
+            self.cover_label.setText("No cover\n(drop an image here)")
+
+        self.cover_remove_button.setEnabled(path is not None)
+
+    def _choose_cover(self) -> None:
+        if self._current_record_id() is None:
+            return
+
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose a cover image",
+            str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tif *.tiff);;"
+            "All Files (*)",
+        )
+        if filename:
+            self._set_cover(Path(filename))
+
+    def _on_cover_dropped(self, filename: str) -> None:
+        self._set_cover(Path(filename))
+
+    def _set_cover(self, source: Path) -> None:
+        record_id = self._current_record_id()
+        if record_id is None:
+            return
+
+        try:
+            ArtworkService().set_image(record_id, source)
+        except ArtworkError as exc:
+            self.message_label.setText(f"Cover not changed: {exc}")
+            return
+
+        self._update_cover_panel()
+        self.message_label.setText("Cover updated.")
+
+    def _remove_cover(self) -> None:
+        record_id = self._current_record_id()
+        if record_id is None or self.current_row is None:
+            return
+
+        primary_key = self.db.primary_key("Records") or "RecordID"
+        answer = QMessageBox.question(
+            self,
+            "Remove cover",
+            f"Remove the cover of "
+            f"{self._record_description('Records', primary_key, self.current_row)}?"
+            "\n\nThe image file is deleted and cannot be brought back.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            ArtworkService().remove(record_id)
+        except OSError as exc:
+            self.message_label.setText(f"Cover not removed: {exc}")
+            return
+
+        self._update_cover_panel()
+        self.message_label.setText("Cover removed.")
+
+    # ========================================================
     # Keyboard shortcuts
     # ========================================================
     #
     # Shortcuts act through the same buttons and handlers the mouse
-    # uses, so the two can never behave differently. There is
-    # deliberately no Delete-key shortcut: delete_record() removes the
-    # selected record straight away, with no confirmation.
+    # uses, so the two can never behave differently. The Delete key is
+    # bound to the record list only, and delete_record() asks for
+    # confirmation, so neither the key nor the button deletes silently.
 
     def _install_shortcuts(self) -> None:
         self._shortcuts: dict[str, QShortcut] = {}
 
-        def add(key: str, handler: Callable[[], None]) -> None:
-            shortcut = QShortcut(QKeySequence(key), self)
+        def add(
+            key: str,
+            handler: Callable[[], None],
+            *,
+            widget: QWidget | None = None,
+        ) -> None:
+            shortcut = QShortcut(QKeySequence(key), widget or self)
+            if widget is not None:
+                # Only while that widget has focus - a window-wide
+                # Delete would fire while erasing text in a box.
+                shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
             shortcut.activated.connect(handler)
             self._shortcuts[key] = shortcut
 
@@ -1407,12 +1607,17 @@ class MainWindow(QMainWindow):
         add("Ctrl+S", self._shortcut_save)
         add("Alt+Up", lambda: self._shortcut_move_schedule("Move Up"))
         add("Alt+Down", lambda: self._shortcut_move_schedule("Move Down"))
+        add("Delete", self._shortcut_delete, widget=self.table_widget)
 
         self.refresh_button.setToolTip("Reload the data (F5)")
         self.new_button.setToolTip("Start a new record (Ctrl+N)")
         self.save_button.setToolTip("Save the record (Ctrl+S)")
         self.browse_export_button.setToolTip("Export the rows shown (Ctrl+E)")
         self.search_box.setToolTip("Filter the rows shown (Ctrl+F)")
+        self.delete_button.setToolTip(
+            "Delete the selected record - asks first "
+            "(Delete key while the list has focus)"
+        )
 
     def _on_browse_tab(self) -> bool:
         return self.main_tabs.currentWidget() is self._browse_widget
@@ -1475,6 +1680,11 @@ class MainWindow(QMainWindow):
 
         if self._on_browse_tab():
             self.save_button.click()
+
+    def _shortcut_delete(self) -> None:
+        """Delete key (record list focused): press Delete, which asks first."""
+
+        self.delete_button.click()
 
     def _shortcut_move_schedule(self, button_text: str) -> None:
         """
@@ -1661,6 +1871,8 @@ class MainWindow(QMainWindow):
         return relationships
 
     def _update_related_tabs(self) -> None:
+        self._update_cover_panel()
+
         for i in range(self.related_tabs.count()):
             title = self.related_tabs.tabText(i)
             widget = self.related_tabs.widget(i)
@@ -2420,6 +2632,7 @@ class MainWindow(QMainWindow):
                 field.setValue(0)
             elif isinstance(field, QLineEdit):
                 field.clear()
+        self._update_cover_panel()
 
     def save_record(self) -> None:
         if not self.current_table:
@@ -2468,14 +2681,70 @@ class MainWindow(QMainWindow):
         if not primary_key:
             return
 
+        answer = QMessageBox.question(
+            self,
+            "Delete record",
+            f"Delete {self._record_description(self.current_table, primary_key, self.current_row)}?"
+            "\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.message_label.setText("Delete cancelled.")
+            return
+
+        deleted_table = self.current_table
+        deleted_id = self.current_row[primary_key]
+
         try:
             repository = repository_for(self.context, self.current_table)
-            repository.delete(self.current_row[primary_key], commit=True)
+            repository.delete(deleted_id, commit=True)
+            if deleted_table == "Records":
+                self._remove_cover_of_deleted_record(deleted_id)
             self.message_label.setText("Record deleted.")
             self.load_table_data(self.current_table)
         except (DatabaseError, ValueError, TypeError) as exc:
             self.message_label.setText(f"Delete failed: {exc}")
             QMessageBox.critical(self, "Delete failed", str(exc))
+
+    @staticmethod
+    def _record_description(
+        table: str, primary_key: str, row: dict[str, Any]
+    ) -> str:
+        """e.g. 'Artists #1571 (Roy)': table, id, and the first text value."""
+
+        label = next(
+            (
+                str(value).strip()
+                for column, value in row.items()
+                if column != primary_key
+                and isinstance(value, str)
+                and value.strip()
+            ),
+            "",
+        )
+        base = f"{table} #{row[primary_key]}"
+
+        return f"{base} ({label})" if label else base
+
+    @staticmethod
+    def _remove_cover_of_deleted_record(record_id: Any) -> None:
+        """
+        A deleted record's cover would otherwise be left behind, and
+        a later record can be given the same ID, so remove it now.
+        """
+
+        if not isinstance(record_id, int):
+            return
+
+        try:
+            ArtworkService().remove(record_id)
+        except OSError as exc:
+            logger.warning(
+                "Could not remove the cover of deleted record %s: %s",
+                record_id,
+                exc,
+            )
 
     def _collect_form_values(self) -> dict[str, Any]:
         values: dict[str, Any] = {}
