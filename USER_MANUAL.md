@@ -96,7 +96,15 @@ Click a row and its fields appear in the form on the right. Change them and pres
 To add a record press **New** (Ctrl+N), fill in the fields and press **Save**. **Clear** only empties the form; nothing stored is changed, but be aware that pressing Save afterwards adds a new record.
 
 ### Deleting a record
-Select the row and press **Delete**, or press the **Delete key** while the list of rows has the focus. The application first asks you to confirm, naming the record, and the answer you get by pressing Enter is **No**. A deletion cannot be undone; the daily backup (see Backups) is your way back. If other records still depend on the one you are deleting, the database may refuse and the message explains why.
+Select the row and press **Delete**, or press the **Delete key** while the list of rows has the focus. The application first asks you to confirm, naming the record, and the answer you get by pressing Enter is **No**. If other records still depend on the one you are deleting, the database may refuse and the message explains why.
+
+**Undo delete.** Straight after deleting, the **Undo delete** button (or **Ctrl+Z** while the list of rows has the focus) brings the record back, exactly as it was and with its cover. Its tooltip names the record it would restore. This is deliberately limited:
+
+- Only the **most recent** deletion can be undone; deleting something else replaces it.
+- It is forgotten when you close the application. For anything older, the daily backup (see Backups) is your way back.
+- If the record's number has meanwhile been given to a new record, the application says so and leaves both alone.
+
+Ctrl+Z inside a text box still only undoes your typing.
 
 The Delete key does nothing while you are typing in a text box, so it cannot remove a record by accident.
 
@@ -286,6 +294,7 @@ A release can belong to one record only, and a record can have only one release.
 | Ctrl+S | Save the record being edited (Browse) |
 | Alt+Up / Alt+Down | Move the selected rows of a Program's Schedule up or down |
 | Delete | Delete the selected record, after asking you to confirm (only while the list of rows has the focus) |
+| Ctrl+Z | Bring back the record you just deleted (only while the list of rows has the focus; same as Undo delete) |
 
 Hovering over a tab or button shows its shortcut. The Delete key only acts while the list of rows has the focus, never while you are typing in a box, and it always asks for confirmation first.
 

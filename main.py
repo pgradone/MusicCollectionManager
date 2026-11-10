@@ -57,6 +57,7 @@ from core.relationship_operations import RelationshipError, link, list_related, 
 from core.relationships import DIRECT, JUNCTION, Relationship, SoftForeignKey, discover_relationships
 from core.repository import RecordNotFoundError, repository_for
 from services.artwork_service import ArtworkError, ArtworkService
+from services.delete_undo import DeleteUndo, UndoError
 from services.discogs_import import DiscogsImporter, DiscogsImportError
 from services.discogs_service import DiscogsService
 from services.program_service import ProgramService, ProgramValidationError
@@ -286,6 +287,7 @@ class MainWindow(QMainWindow):
 
         self.db = DatabaseManager()
         self.context = DatabaseContext(self.db)
+        self._deletions = DeleteUndo(self.context)
         # Set by _move_selected_schedule_rows() right before a reload,
         # so _build_schedule_subform() can restore the same selection
         # (at its new positions) once the table is rebuilt - without
@@ -356,6 +358,11 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.new_button)
         controls_layout.addWidget(self.save_button)
         controls_layout.addWidget(self.delete_button)
+
+        self.undo_button = QPushButton("Undo delete")
+        self.undo_button.setEnabled(False)
+        self.undo_button.clicked.connect(self._undo_delete)
+        controls_layout.addWidget(self.undo_button)
         controls_layout.addWidget(self.clear_button)
 
         self.browse_export_button = QPushButton("Export")
@@ -1608,6 +1615,7 @@ class MainWindow(QMainWindow):
         add("Alt+Up", lambda: self._shortcut_move_schedule("Move Up"))
         add("Alt+Down", lambda: self._shortcut_move_schedule("Move Down"))
         add("Delete", self._shortcut_delete, widget=self.table_widget)
+        add("Ctrl+Z", self._shortcut_undo, widget=self.table_widget)
 
         self.refresh_button.setToolTip("Reload the data (F5)")
         self.new_button.setToolTip("Start a new record (Ctrl+N)")
@@ -1618,6 +1626,7 @@ class MainWindow(QMainWindow):
             "Delete the selected record - asks first "
             "(Delete key while the list has focus)"
         )
+        self.undo_button.setToolTip("Nothing to undo")
 
     def _on_browse_tab(self) -> bool:
         return self.main_tabs.currentWidget() is self._browse_widget
@@ -1685,6 +1694,11 @@ class MainWindow(QMainWindow):
         """Delete key (record list focused): press Delete, which asks first."""
 
         self.delete_button.click()
+
+    def _shortcut_undo(self) -> None:
+        """Ctrl+Z (record list focused): press Undo delete."""
+
+        self.undo_button.click()
 
     def _shortcut_move_schedule(self, button_text: str) -> None:
         """
@@ -2685,7 +2699,8 @@ class MainWindow(QMainWindow):
             self,
             "Delete record",
             f"Delete {self._record_description(self.current_table, primary_key, self.current_row)}?"
-            "\n\nThis cannot be undone.",
+            "\n\nYou can bring it back with Undo delete until you delete "
+            "something else or close the application.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -2693,19 +2708,65 @@ class MainWindow(QMainWindow):
             self.message_label.setText("Delete cancelled.")
             return
 
-        deleted_table = self.current_table
-        deleted_id = self.current_row[primary_key]
-
         try:
-            repository = repository_for(self.context, self.current_table)
-            repository.delete(deleted_id, commit=True)
-            if deleted_table == "Records":
-                self._remove_cover_of_deleted_record(deleted_id)
-            self.message_label.setText("Record deleted.")
+            self._deletions.delete(
+                self.current_table, self.current_row[primary_key]
+            )
+            self.message_label.setText(
+                "Record deleted. Press Undo delete to bring it back."
+            )
+            self._update_undo_button()
             self.load_table_data(self.current_table)
-        except (DatabaseError, ValueError, TypeError) as exc:
+        except (DatabaseError, ValueError, TypeError, ArtworkError) as exc:
             self.message_label.setText(f"Delete failed: {exc}")
             QMessageBox.critical(self, "Delete failed", str(exc))
+
+    def _update_undo_button(self) -> None:
+        last = self._deletions.last
+        self.undo_button.setEnabled(last is not None)
+
+        if last is None:
+            self.undo_button.setToolTip("Nothing to undo")
+            return
+
+        description = self._record_description(
+            last.table, last.primary_key_column, last.row
+        )
+        self.undo_button.setToolTip(
+            f"Bring back {description} (Ctrl+Z while the list has focus)"
+        )
+
+    def _undo_delete(self) -> None:
+        """Put the most recently deleted record back and show it."""
+
+        try:
+            result = self._deletions.restore()
+        except (UndoError, DatabaseError) as exc:
+            self.message_label.setText(f"Cannot undo: {exc}")
+            return
+
+        record = result.record
+        self._update_undo_button()
+
+        # Reload first when it is the table already showing:
+        # _navigate_to_related_value only reloads if the table changes.
+        if record.table == self.current_table:
+            self.load_table_data(self.current_table)
+
+        self._navigate_to_related_value(
+            record.table, record.primary_key_column, str(record.primary_key_value)
+        )
+
+        message = (
+            "Restored "
+            + self._record_description(
+                record.table, record.primary_key_column, record.row
+            )
+            + "."
+        )
+        if result.cover_restored is False:
+            message += " Its cover could not be restored."
+        self.message_label.setText(message)
 
     @staticmethod
     def _record_description(
@@ -2726,25 +2787,6 @@ class MainWindow(QMainWindow):
         base = f"{table} #{row[primary_key]}"
 
         return f"{base} ({label})" if label else base
-
-    @staticmethod
-    def _remove_cover_of_deleted_record(record_id: Any) -> None:
-        """
-        A deleted record's cover would otherwise be left behind, and
-        a later record can be given the same ID, so remove it now.
-        """
-
-        if not isinstance(record_id, int):
-            return
-
-        try:
-            ArtworkService().remove(record_id)
-        except OSError as exc:
-            logger.warning(
-                "Could not remove the cover of deleted record %s: %s",
-                record_id,
-                exc,
-            )
 
     def _collect_form_values(self) -> dict[str, Any]:
         values: dict[str, Any] = {}

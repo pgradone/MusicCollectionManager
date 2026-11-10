@@ -226,3 +226,53 @@ def test_the_default_folder_comes_from_config(
     monkeypatch.setattr(config, "ARTWORK_FOLDER", tmp_path / "configured")
 
     assert ArtworkService().folder == tmp_path / "configured"
+
+
+# ============================================================
+# read / write_raw (used to bring a deleted record's cover back)
+# ============================================================
+
+
+def test_read_returns_none_without_a_cover(artwork: ArtworkService) -> None:
+    assert artwork.read(8) is None
+
+
+def test_read_returns_the_stored_bytes(
+    artwork: ArtworkService, tmp_path: Path
+) -> None:
+    artwork.set_image(8, make_image(tmp_path / "a.png"))
+
+    assert artwork.read(8) == artwork.path_for(8).read_bytes()
+
+
+def test_write_raw_puts_back_exactly_what_read_returned(
+    artwork: ArtworkService, tmp_path: Path
+) -> None:
+    artwork.set_image(8, make_image(tmp_path / "a.png"))
+    saved = artwork.read(8)
+    assert saved is not None
+    artwork.remove(8)
+
+    artwork.write_raw(8, saved)
+
+    assert artwork.read(8) == saved
+    assert [p.name for p in artwork.folder.iterdir()] == ["8.jpg"]
+
+
+def test_write_raw_failure_is_an_artwork_error(tmp_path: Path) -> None:
+    blocker = tmp_path / "artwork"
+    blocker.write_text("a file where the folder should be", encoding="utf-8")
+
+    with pytest.raises(ArtworkError):
+        ArtworkService(blocker).write_raw(1, b"data")
+
+
+def test_set_image_failure_to_create_the_folder_is_an_artwork_error(
+    tmp_path: Path,
+) -> None:
+    blocker = tmp_path / "artwork"
+    blocker.write_text("a file where the folder should be", encoding="utf-8")
+    source = make_image(tmp_path / "a.png")
+
+    with pytest.raises(ArtworkError, match="Cannot save the cover"):
+        ArtworkService(blocker).set_image(1, source)

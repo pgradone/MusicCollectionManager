@@ -1764,7 +1764,7 @@ def test_discogs_import_up_to_date_file_needs_no_confirmation(
 EXPECTED_SHORTCUTS = {
     "Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
     "Ctrl+F", "F5", "Ctrl+E", "Ctrl+N", "Ctrl+S", "Alt+Up", "Alt+Down",
-    "Delete",
+    "Delete", "Ctrl+Z",
 }
 
 
@@ -2061,7 +2061,7 @@ def test_confirmation_names_the_record_being_deleted(
 
         text = question.call_args[0][2]
         assert f"Artists #{artist_id} (ZzzDeleteNamed)" in text
-        assert "cannot be undone" in text
+        assert "bring it back with Undo delete" in text
         # The safe answer is the default.
         assert question.call_args[0][4] == QMessageBox.StandardButton.No
     finally:
@@ -2398,4 +2398,233 @@ def test_deleting_a_row_of_another_table_leaves_covers_alone(
         assert artists.get(artist_id) is None
         assert ArtworkService().get(artist_id) is not None
     finally:
+        artists.delete(artist_id, commit=True)
+
+
+# ============================================================
+# Undo delete (Milestone 7B (2/N))
+# ============================================================
+
+
+def _delete_selected(window: MainWindow) -> None:
+    with patch(
+        "main.QMessageBox.question",
+        return_value=QMessageBox.StandardButton.Yes,
+    ):
+        window.delete_button.click()
+
+
+def test_undo_is_unavailable_until_something_is_deleted(
+    window: MainWindow,
+) -> None:
+    assert not window.undo_button.isEnabled()
+    assert window.undo_button.toolTip() == "Nothing to undo"
+
+
+def test_ctrl_z_is_bound_to_the_record_list_only(window: MainWindow) -> None:
+    shortcut = window._shortcuts["Ctrl+Z"]
+
+    assert shortcut.context() == Qt.ShortcutContext.WidgetShortcut
+    assert shortcut.parent() is window.table_widget
+
+
+def test_undo_brings_back_the_deleted_record_and_selects_it(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert(
+        {"Surname": "ZzzUndoWindow", "Name": "Alex"}, commit=True
+    )
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        _delete_selected(crud_window)
+
+        assert artists.get(artist_id) is None
+        assert crud_window.undo_button.isEnabled()
+        assert f"Artists #{artist_id} (Alex)" in crud_window.undo_button.toolTip()
+        assert "Press Undo delete" in crud_window.message_label.text()
+
+        crud_window.undo_button.click()
+
+        assert artists.require(artist_id)["Surname"] == "ZzzUndoWindow"
+        assert not crud_window.undo_button.isEnabled()
+        assert crud_window.message_label.text() == (
+            f"Restored Artists #{artist_id} (Alex)."
+        )
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["ArtistID"] == artist_id
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_declining_the_delete_leaves_nothing_to_undo(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzUndoDeclined"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+
+        with patch(
+            "main.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ):
+            crud_window.delete_button.click()
+
+        assert not crud_window.undo_button.isEnabled()
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_undo_also_brings_back_the_cover(
+    crud_window: MainWindow, tmp_path: Path
+) -> None:
+    record_id = _new_record(crud_window.context, "ZzzUndoWindowCover")
+    ArtworkService().set_image(record_id, _picture(tmp_path))
+
+    try:
+        _select_record(crud_window, record_id)
+        _delete_selected(crud_window)
+        assert ArtworkService().get(record_id) is None
+
+        crud_window.undo_button.click()
+
+        assert ArtworkService().get(record_id) is not None
+        assert not crud_window.cover_label.pixmap().isNull()
+    finally:
+        RecordService(crud_window.context).delete(record_id)
+
+
+def test_undo_shows_the_record_even_after_switching_tables(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzUndoSwitch"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        _delete_selected(crud_window)
+
+        _select_table_via_combo(crud_window, "Songs")
+        assert crud_window.current_table == "Songs"
+
+        crud_window.undo_button.click()
+
+        assert crud_window.current_table == "Artists"
+        assert crud_window.current_row is not None
+        assert crud_window.current_row["ArtistID"] == artist_id
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_undo_reports_when_the_id_has_been_taken(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzUndoGone"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        _delete_selected(crud_window)
+        artists.insert(
+            {"ArtistID": artist_id, "Surname": "ZzzUndoNewcomer"}, commit=True
+        )
+
+        crud_window.undo_button.click()
+
+        assert crud_window.message_label.text().startswith("Cannot undo:")
+        assert artists.require(artist_id)["Surname"] == "ZzzUndoNewcomer"
+    finally:
+        artists.delete(artist_id, commit=True)
+
+
+def test_only_the_latest_deletion_can_be_undone(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    first = artists.insert({"Surname": "ZzzUndoOne", "Name": "One"}, commit=True)
+    second = artists.insert({"Surname": "ZzzUndoTwo", "Name": "Two"}, commit=True)
+
+    try:
+        for artist_id in (first, second):
+            crud_window.load_table_data("Artists")
+            crud_window.table_widget.selectRow(
+                _artist_row(crud_window, artist_id)
+            )
+            _delete_selected(crud_window)
+
+        assert f"Artists #{second} (Two)" in crud_window.undo_button.toolTip()
+
+        crud_window.undo_button.click()
+
+        assert artists.get(second) is not None
+        assert artists.get(first) is None
+        assert not crud_window.undo_button.isEnabled()
+    finally:
+        artists.delete(second, commit=True)
+
+
+def test_ctrl_z_on_the_record_list_undoes_the_delete(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzUndoKey"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        _delete_selected(crud_window)
+        assert artists.get(artist_id) is None
+
+        crud_window.show()
+        crud_window.activateWindow()
+        crud_window.table_widget.setFocus()
+        QApplication.processEvents()
+        QTest.keyClick(
+            crud_window.table_widget,
+            Qt.Key.Key_Z,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+        QApplication.processEvents()
+
+        assert artists.get(artist_id) is not None
+    finally:
+        crud_window.hide()
+        artists.delete(artist_id, commit=True)
+
+
+def test_ctrl_z_while_typing_is_left_to_the_text_box(
+    crud_window: MainWindow,
+) -> None:
+    artists = repository_for(crud_window.context, "Artists")
+    artist_id = artists.insert({"Surname": "ZzzUndoTyping"}, commit=True)
+
+    try:
+        crud_window.load_table_data("Artists")
+        crud_window.table_widget.selectRow(_artist_row(crud_window, artist_id))
+        _delete_selected(crud_window)
+
+        crud_window.show()
+        crud_window.activateWindow()
+        crud_window.search_box.setFocus()
+        QApplication.processEvents()
+        QTest.keyClick(
+            crud_window.search_box,
+            Qt.Key.Key_Z,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+        QApplication.processEvents()
+
+        # Ctrl+Z in a text box undoes typing, not the deletion.
+        assert artists.get(artist_id) is None
+        assert crud_window.undo_button.isEnabled()
+    finally:
+        crud_window.hide()
+        crud_window.undo_button.click()  # put it back so cleanup is uniform
         artists.delete(artist_id, commit=True)

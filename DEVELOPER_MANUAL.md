@@ -174,6 +174,8 @@ The `services/` layer contains application-facing behavior. It builds on the gen
 | `search_service.py` | Global search across the main tables. |
 | `discogs_service.py` | Reaching records and songs through a Discogs release number, and suggesting matches. |
 | `discogs_import.py` | Importing a newer Discogs collection export. |
+| `artwork_service.py` | Cover image files for Records. |
+| `delete_undo.py` | Deleting a row from a main table in a way that can be undone. |
 
 The entity services validate input and raise service-specific errors (`ServiceError` subclasses). Report, search and Discogs services are different in kind: they read whole tables rather than perform single-row operations, so they use `repository_for()` directly. None of them contains SQL.
 
@@ -230,6 +232,7 @@ Records can have a cover image. It is deliberately **not** stored in the databas
 - `set_image(record_id, source)` opens the source with Pillow, turns it upright using its EXIF orientation, flattens transparency onto white, shrinks it to fit within `MAX_SIZE` (1000) pixels without enlarging, and saves a JPEG. It writes `<id>.jpg.tmp` first and then `os.replace`s it, so a failure never destroys the cover already there.
 - Anything unreadable raises `ArtworkError` with a message naming the file; a missing file, a non-image and a decompression bomb all take that path.
 - `remove(record_id)` returns whether there was a cover.
+- `read(record_id)` returns the stored bytes and `write_raw(record_id, data)` puts the same bytes back unchanged; they exist so a deleted record's cover can be restored. Every failure to read or write a file, including failing to create the folder, surfaces as `ArtworkError`, never a raw `OSError`, because the window only expects the former.
 
 ### The Cover panel in `main.py`
 `cover_group` sits beside the record details and is visible only while a `Records` row with an integer ID is selected (`_current_record_id()`). `_update_cover_panel()` runs at the start of `_update_related_tabs()` (which `load_table_data()` always ends with) and at the end of `clear_form()`, so it follows every selection change. It loads the picture from the file's bytes instead of `QPixmap(path)`, so a replaced cover is never served from Qt's cache.
@@ -237,12 +240,29 @@ Records can have a cover image. It is deliberately **not** stored in the databas
 `ArtworkLabel` is a `QLabel` that accepts a dropped image file and emits `imageDropped(path)`; it welcomes only local files, not text or web addresses. Problems with a chosen file are shown in the status line, not in a message box.
 
 ### Deleting records
-`delete_record()` removes the cover of a deleted **Records** row (`_remove_cover_of_deleted_record`). This matters because SQLite can hand a deleted record's ID to a later record, which would otherwise inherit the old cover. The cleanup lives in the UI, not in `RecordService.delete()`, so service tests never touch the artwork folder. Rows of other tables are never touched, even if their ID equals a record's ID.
+`DeleteUndo.delete()` (see Undoing a Deletion) removes the cover of a deleted **Records** row, after keeping its bytes so an undo can restore it. This matters because SQLite can hand a deleted record's ID to a later record, which would otherwise inherit the old cover. The cleanup is in `DeleteUndo`, not in `RecordService.delete()`, so tests of `RecordService` never touch the artwork folder. Rows of other tables are never touched, even if their ID equals a record's ID.
 
 ### Not covered by backups
 `backup_database()` copies only the database. Covers live in `artwork/`, which is not backed up and is in `.gitignore`.
 
-## 15. Startup, Backup and Logging
+## 15. Undoing a Deletion
+
+`services/delete_undo.py` makes the **Delete** action in Browse undoable, in the cheapest way that is also safe.
+
+### Why a plain re-insert is enough
+Every foreign key in the database is `NO ACTION`, and `DatabaseManager` turns `PRAGMA foreign_keys` on. A row that other rows still reference therefore **cannot be deleted at all**; the database refuses and nothing changes. So a deletion that succeeds removes exactly one row (plus a Record's cover file), and inserting that same row again, primary key included, restores everything. Undeclared "soft" references (`Records.ArtistID`, `Schedule.SongID`) point at the right row again by themselves. If the schema ever gains `ON DELETE CASCADE`, this assumption breaks and the undo must also capture the cascaded rows.
+
+### `DeleteUndo(context, artwork=None)`
+- `delete(table, key)` reads the row (`require`), reads the cover bytes for `Records`, deletes the row, then deletes the cover file, and remembers a `DeletedRecord(table, primary_key_column, row, cover)`. Nothing is remembered and nothing is lost if the database refuses. A cover that cannot be read abandons the deletion before anything is removed.
+- `restore()` re-inserts the stored row, writes the cover back, and returns `RestoreResult(record, cover_restored)`. `cover_restored` is `None` (no cover), `True`, or `False` (the row is back but the cover could not be written; logged).
+- `last` is the deletion `restore()` would undo.
+
+Deliberate limits: **one level** (a new deletion replaces the remembered one), **in memory** (gone when the application closes), and a restore is **refused with `UndoError`** if the primary key has been taken since, which can happen because SQLite may reuse a deleted row's ID. After a refusal the deletion stays remembered.
+
+### In the window
+`MainWindow` owns one `DeleteUndo` (`self._deletions`), and `delete_record()` calls it instead of the repository. The **Undo delete** button (`undo_button`) is enabled only while something can be restored, and its tooltip names the record. `_undo_delete()` reloads the table when the restored row belongs to the table already showing, because `_navigate_to_related_value()` only reloads when the table combo changes, and then selects the restored row. `Ctrl+Z` is bound to the record list only (`WidgetShortcut`), so Ctrl+Z in a text box keeps undoing typing.
+
+## 16. Startup, Backup and Logging
 
 `main.run_startup_tasks()` runs first in `main()`, before the `QApplication` and `MainWindow` exist:
 
@@ -260,7 +280,7 @@ Backups are named by date, and `todays_backup()` reads the date from the name ra
 
 Configuration lives in `config.py`: `AUTO_BACKUP`, `MAX_BACKUPS`, `BACKUP_FOLDER`, `LOG_FOLDER`, `LOG_LEVEL`, `EXPORT_FOLDER`, `DATABASE_FILE`.
 
-## 16. UI Layer
+## 17. UI Layer
 
 The preferred dependency direction is:
 
@@ -292,9 +312,9 @@ The tabs under the record form come from `discover_relationships()`, not from ha
 `load_table_data()` rebuilds the related tabs **more than once per call**, because re-selecting the current row fires the selection signal again. Anything a rebuild must restore therefore has to be idempotent and cleared only after the whole reload has finished. `_pending_schedule_reselect` follows this rule: it is set before the reload, re-applied by every rebuild of the Schedule tab, and cleared afterwards, which is what keeps the moved rows selected.
 
 ### Keyboard shortcuts
-`_install_shortcuts()` creates the `QShortcut` objects, keeps them in `self._shortcuts` keyed by their key text, and sets tooltips. Handlers do not duplicate behavior: they click the same button the mouse would (`save_button`, `new_button`, each tab's export button, and the Move Up / Move Down buttons of the open related tab). `Delete` is bound to the record list only (`Qt.ShortcutContext.WidgetShortcut` with `table_widget` as parent); a window-wide Delete would fire while erasing text in a box. `delete_record()` itself asks for confirmation, so the button and the key behave identically.
+`_install_shortcuts()` creates the `QShortcut` objects, keeps them in `self._shortcuts` keyed by their key text, and sets tooltips. Handlers do not duplicate behavior: they click the same button the mouse would (`save_button`, `new_button`, each tab's export button, and the Move Up / Move Down buttons of the open related tab). `Delete` is bound to the record list only (`Qt.ShortcutContext.WidgetShortcut` with `table_widget` as parent); a window-wide Delete would fire while erasing text in a box. `delete_record()` itself asks for confirmation, so the button and the key behave identically. `Ctrl+Z` is bound the same way (record list only) and presses `undo_button`.
 
-## 17. Why the Layers Matter
+## 18. Why the Layers Matter
 
 | Layer | Responsibility |
 |---|---|
@@ -309,7 +329,7 @@ The tabs under the record form come from `discover_relationships()`, not from ha
 
 This separation allows one layer to evolve without rewriting the entire application.
 
-## 18. Transaction Semantics
+## 19. Transaction Semantics
 
 Transaction control remains with `DatabaseManager`.
 
@@ -327,7 +347,7 @@ DatabaseManager:
 
 The transaction tests cover insert/update/delete with both commit and rollback behavior.
 
-## 19. Foreign Keys and Integrity
+## 20. Foreign Keys and Integrity
 
 SQLite foreign-key enforcement is part of the tested architecture.
 
@@ -335,7 +355,7 @@ Relationships such as `Belong`, `Contain`, and `Sing` must not create references
 
 Database integrity checks are also part of the test coverage.
 
-## 20. Testing
+## 21. Testing
 
 The normal verification command is:
 
@@ -359,7 +379,7 @@ Tests cover the repository, CRUD, validation, composite keys, transactions, fore
 - **Qt items.** Read what you need from a `QTableWidgetItem` before triggering anything that rebuilds the table; the item is deleted by the rebuild.
 - Running the tests changes `Musi.db` and `Musi_crud_test.db` slightly. Restore them with `git checkout -- Musi.db tests/Musi_crud_test.db` before committing, and add files to git by name.
 
-## 21. Development Workflow
+## 22. Development Workflow
 
 A safe development cycle is:
 
@@ -375,7 +395,7 @@ A safe development cycle is:
 
 Keeping commits aligned with completed, passing milestones makes regressions easier to identify.
 
-## 22. Rules for Future Development
+## 23. Rules for Future Development
 
 ### Do not bypass `DatabaseManager`
 Do not introduce independent `sqlite3.connect(...)` calls in application code.
@@ -392,7 +412,7 @@ Use schema and relationship metadata rather than scattering table structure thro
 ### Keep UI database-agnostic
 The UI should ask services to perform application operations rather than constructing SQL.
 
-## 23. State of `main.py`
+## 24. State of `main.py`
 
 The goal set out earlier has been reached: `main.py` contains no SQL. Every table load, save and delete goes through `Repository`; related records go through `core.relationships` and `core.relationship_operations`; behavior with rules (schedules, Discogs, reports, search, import) goes through a service. What `main.py` still asks of `DatabaseManager` is schema metadata only (`columns()`, `primary_key()`).
 
@@ -418,7 +438,7 @@ Known loose ends:
 - `core/settings.py` exists and is tested but nothing uses it yet.
 - Not every Qt dialog path is covered by tests.
 
-## 24. Adding a New Entity
+## 25. Adding a New Entity
 
 Preferred sequence:
 
@@ -432,7 +452,7 @@ Preferred sequence:
 8. Run `pytest -q`.
 9. Wire the UI only after the infrastructure tests pass.
 
-## 25. Database Architecture at a Glance
+## 26. Database Architecture at a Glance
 
 ```text
                          APPLICATION
@@ -470,7 +490,7 @@ Preferred sequence:
                  SQLite
 ```
 
-## 26. Final Architectural Principle
+## 27. Final Architectural Principle
 
 > **Application behavior belongs above the database infrastructure; database mechanics belong below it.**
 

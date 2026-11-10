@@ -25,6 +25,7 @@ DatabaseContext: it only knows about files.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 
@@ -70,15 +71,49 @@ class ArtworkService:
 
         image = self._load(source)
 
-        self.folder.mkdir(parents=True, exist_ok=True)
         destination = self.path_for(record_id)
         temporary = destination.with_name(destination.name + ".tmp")
 
         try:
+            self.folder.mkdir(parents=True, exist_ok=True)
             image.save(temporary, format="JPEG", quality=JPEG_QUALITY)
             os.replace(temporary, destination)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
+            raise ArtworkError(f"Cannot save the cover: {exc}") from exc
+
+        return destination
+
+    def read(self, record_id: int) -> bytes | None:
+        """The cover file's exact bytes, or None when there is no cover."""
+
+        path = self.get(record_id)
+
+        if path is None:
+            return None
+
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise ArtworkError(f"Cannot read the cover: {exc}") from exc
+
+    def write_raw(self, record_id: int, data: bytes) -> Path:
+        """
+        Put back exactly the bytes read() returned, without converting
+        them again. Used to bring a deleted record's cover back.
+        """
+
+        destination = self.path_for(record_id)
+        temporary = destination.with_name(destination.name + ".tmp")
+
+        try:
+            self.folder.mkdir(parents=True, exist_ok=True)
+            temporary.write_bytes(data)
+            os.replace(temporary, destination)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
             raise ArtworkError(f"Cannot save the cover: {exc}") from exc
 
         return destination
