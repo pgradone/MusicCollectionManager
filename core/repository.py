@@ -133,6 +133,50 @@ class Repository:
         return self.count()
 
     # =====================================================
+    # SQL dialect: paging
+    # =====================================================
+
+    @staticmethod
+    def _paging_sql(
+        limit: int | None, offset: int | None
+    ) -> tuple[str, list[Any]]:
+        """
+        The LIMIT / OFFSET clause, and the one place that spells it.
+
+        SQLite syntax: ``LIMIT n OFFSET m``. SQLite will not accept an
+        OFFSET without a LIMIT, so when only an offset is given an
+        unbounded ``LIMIT -1`` is added. Another database would render
+        this differently (Oracle: ``OFFSET m ROWS FETCH NEXT n ROWS
+        ONLY``), which is why it is kept in a single method.
+        """
+
+        sql = ""
+        parameters: list[Any] = []
+
+        if limit is not None:
+            if limit < 0:
+                raise RepositoryValidationError(
+                    "limit cannot be negative."
+                )
+
+            sql += " LIMIT ?"
+            parameters.append(limit)
+
+        if offset is not None:
+            if offset < 0:
+                raise RepositoryValidationError(
+                    "offset cannot be negative."
+                )
+
+            if limit is None:
+                sql += " LIMIT -1"
+
+            sql += " OFFSET ?"
+            parameters.append(offset)
+
+        return sql, parameters
+
+    # =====================================================
     # Identifier handling
     # =====================================================
 
@@ -392,26 +436,9 @@ class Repository:
             )
             sql += f" {direction}"
 
-        if limit is not None:
-            if limit < 0:
-                raise RepositoryValidationError(
-                    "limit cannot be negative."
-                )
-
-            sql += " LIMIT ?"
-            parameters.append(limit)
-
-        if offset is not None:
-            if offset < 0:
-                raise RepositoryValidationError(
-                    "offset cannot be negative."
-                )
-
-            if limit is None:
-                sql += " LIMIT -1"
-
-            sql += " OFFSET ?"
-            parameters.append(offset)
+        paging_sql, paging_parameters = self._paging_sql(limit, offset)
+        sql += paging_sql
+        parameters.extend(paging_parameters)
 
         rows = self.db.fetchall(
             sql,
@@ -496,26 +523,9 @@ class Repository:
             )
             sql += f" {direction}"
 
-        if limit is not None:
-            if limit < 0:
-                raise RepositoryValidationError(
-                    "limit cannot be negative."
-                )
-
-            sql += " LIMIT ?"
-            parameters.append(limit)
-
-        if offset is not None:
-            if offset < 0:
-                raise RepositoryValidationError(
-                    "offset cannot be negative."
-                )
-
-            if limit is None:
-                sql += " LIMIT -1"
-
-            sql += " OFFSET ?"
-            parameters.append(offset)
+        paging_sql, paging_parameters = self._paging_sql(limit, offset)
+        sql += paging_sql
+        parameters.extend(paging_parameters)
 
         rows = self.db.fetchall(
             sql,
@@ -546,8 +556,7 @@ class Repository:
         sql = (
             f"SELECT * FROM "
             f"{self._quote_identifier(self.table_name)} "
-            f"WHERE {where_sql} "
-            f"LIMIT 1"
+            f"WHERE {where_sql}"
         )
 
         row = self.db.fetchone(
@@ -936,7 +945,7 @@ class Repository:
     def _row_to_dict(
         row: Any,
     ) -> dict[str, Any]:
-        """Convert sqlite3.Row to a normal dictionary."""
+        """Convert a database row to a normal dictionary."""
 
         if hasattr(row, "keys"):
             return {

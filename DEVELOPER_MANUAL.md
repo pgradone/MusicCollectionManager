@@ -250,7 +250,7 @@ Records can have a cover image. It is deliberately **not** stored in the databas
 `services/delete_undo.py` makes the **Delete** action in Browse undoable, in the cheapest way that is also safe.
 
 ### Why a plain re-insert is enough
-Every foreign key in the database is `NO ACTION`, and `DatabaseManager` turns `PRAGMA foreign_keys` on. A row that other rows still reference therefore **cannot be deleted at all**; the database refuses and nothing changes. So a deletion that succeeds removes exactly one row (plus a Record's cover file), and inserting that same row again, primary key included, restores everything. Undeclared "soft" references (`Records.ArtistID`, `Schedule.SongID`) point at the right row again by themselves. If the schema ever gains `ON DELETE CASCADE`, this assumption breaks and the undo must also capture the cascaded rows.
+Every foreign key in the database is `NO ACTION`, and `DatabaseManager` turns `PRAGMA foreign_keys` on. A row that other rows still reference therefore **cannot be deleted at all**; the database refuses and nothing changes. So a deletion that succeeds removes exactly one row (plus a Record's cover file), and inserting that same row again, primary key included, restores everything. Undeclared "soft" references (`Records.ArtistID`, `Schedule.SongID`) point at the right row again by themselves. If the schema ever gains `ON DELETE CASCADE`, this assumption breaks and the undo must also capture the cascaded rows. `tests/test_schema_assumptions.py` checks it against the real and the test database, so such a change fails the tests with an explanation.
 
 ### `DeleteUndo(context, artwork=None)`
 - `delete(table, key)` reads the row (`require`), reads the cover bytes for `Records`, deletes the row, then deletes the cover file, and remembers a `DeletedRecord(table, primary_key_column, row, cover)`. Nothing is remembered and nothing is lost if the database refuses. A cover that cannot be read abandons the deletion before anything is removed.
@@ -347,7 +347,41 @@ DatabaseManager:
 
 The transaction tests cover insert/update/delete with both commit and rollback behavior.
 
-## 20. Foreign Keys and Integrity
+## 20. Portability to Other Databases
+
+The application is meant to be reusable on other databases (Access, Oracle) and for other collections. This section records where SQLite is actually used, what another database would have to replace, and which assumptions about the data and schema the code makes. It was written from the code, and the points marked *checked* are enforced by tests.
+
+### Where SQLite lives
+SQLite is confined to the database layer. Everything above it, meaning every service, the window, export, import, artwork and undo, contains **no SQL**.
+
+| Place | What is SQLite-specific |
+| --- | --- |
+| `core/database.py` (about 620 lines) | The only module that imports `sqlite3`. Connecting, `PRAGMA foreign_keys`, `BEGIN`, mapping errors to `ConnectionError` / `QueryError`, schema introspection (`PRAGMA table_info`, `foreign_key_list`, `index_list`, `sqlite_master`), rows as `sqlite3.Row`, and the maintenance helpers `vacuum`, `analyze`, `integrity_check`. |
+| `core/repository.py` (about 980 lines) | Builds all the SQL, and with it the dialect: `?` placeholders (five spots: three `WHERE` clauses, the `INSERT` values, the `UPDATE` assignments), double-quoted identifiers (`_quote_identifier`, one method), and paging (`_paging_sql`, one method, including SQLite's `LIMIT -1`). |
+| `core/schema.py`, `core/relationships.py` | Built from what the database layer reports. Rule names such as `NO ACTION` and declared type names such as `INTEGER` are SQLite's; `_has_numeric_affinity()` recognises numeric types by name fragments (`INT`, `REAL`, `NUM`, `DEC`, ...). |
+| `core/backup.py` | Copies the database file, which suits SQLite and a closed Access file, not a database server. |
+
+### The interface the upper layers really use
+Of everything `DatabaseManager` offers, the layers above it call only these: `connect`, `disconnect`, `commit`, `execute`, `fetchone`, `fetchall`, `transaction`, and the schema reads `tables`, `columns`, `foreign_keys`, `indexes` and `primary_key`. That is the seam. A new backend has to provide those, returning rows that can be indexed by column name, and reports problems as `QueryError` / `ConnectionError`. The maintenance helpers (`vacuum`, `analyze`, `integrity_check`) are SQLite-only and are not called from anywhere outside `core/database.py`; they are candidates to move into a SQLite-specific part or to remove.
+
+### What it would take
+1. Write the backend's manager: connect from a connection string (today `DatabaseManager` and `config.DATABASE_FILE` assume a file path), read that database's own catalog for the schema calls, and translate its errors.
+2. Let `Repository` ask a small dialect object for the placeholder style, identifier quoting and paging text. Paging and quoting are already one method each; the five placeholder spots are the remaining work.
+3. Give the new backend its own backup method, and its own test database. The test fixtures currently point at SQLite files.
+4. Review the assumptions below.
+
+### Assumptions to review for another database
+- **Dates are text.** `Programs.DateCreate` and similar columns hold text such as `2002-06-30 09:05:26`. The Discogs importer decides what changed by comparing `str(stored value)` with the file's text, so a real `DATE` column returning `datetime` objects would make every row look changed.
+- **Generated keys.** Keys are SQLite `INTEGER PRIMARY KEY` columns that fill themselves in, and SQLite may give a deleted row's number to a later row. Undo delete re-inserts a row with its original key, which an identity column declared `GENERATED ALWAYS` would refuse. The code copes with reused numbers by refusing an undo when the key is taken.
+- **Foreign keys never cascade** (*checked* by `tests/test_schema_assumptions.py`, against both the real and the test database). Undo delete depends on it: a row that others depend on cannot be deleted, so a successful delete removes exactly one row. The same test checks that each main table has a single-column primary key.
+- **Oracle details.** Quoted identifiers are case-sensitive; an empty string is the same as `NULL`; and columns such as `Catalog#` and `Collection Media Condition` must stay quoted. Identifiers are already always quoted.
+- **Whole-table reads.** The report, search and Discogs services read whole tables with `Repository.all()` and work in Python. That is fine for thousands of rows and would need database-side filtering for very large tables.
+- **Dialect text is pinned by tests.** `tests/test_repository_dialect.py` checks the paging clause for every combination and that a lookup by key sends no paging syntax.
+
+### What is not about the database
+The services and the window are about *music*: table names, `MAIN_TABLES`, `SOFT_FOREIGN_KEYS`, `REPORT_DEFINITIONS`, the Discogs tab. A different collection (for example videos) would replace `services/` and those lists and keep `core/`. That follows the design choice of a generic engine with domain services on top.
+
+## 21. Foreign Keys and Integrity
 
 SQLite foreign-key enforcement is part of the tested architecture.
 
@@ -355,7 +389,9 @@ Relationships such as `Belong`, `Contain`, and `Sing` must not create references
 
 Database integrity checks are also part of the test coverage.
 
-## 21. Testing
+All foreign keys are `NO ACTION`: nothing cascades, and a row that other rows depend on cannot be deleted. Undo delete relies on this, and `tests/test_schema_assumptions.py` checks it (see Portability to Other Databases).
+
+## 22. Testing
 
 The normal verification command is:
 
@@ -368,6 +404,7 @@ Use `python -m pytest` rather than `pytest` so it works even when the Scripts fo
 Tests cover the repository, CRUD, validation, composite keys, transactions, foreign keys, relationship operations, every service, export, import, startup and the main window.
 
 ### Conventions
+- **Assumption tests.** `tests/test_schema_assumptions.py` (no cascading foreign keys, single-column keys on the main tables) runs against the real database read-only as well as the test copy; `tests/test_repository_dialect.py` pins the SQL dialect text. Both explain what to do if they fail.
 - **Test database.** Tests that write use `tests/Musi_crud_test.db`, never `Musi.db`. In window tests use the `crud_window` fixture, which constructs `MainWindow` and then points it at that database.
 - **`crud_window` caveat.** `MainWindow` loads its first table from the production database before the fixture redirects it. Call `load_table_data()` yourself after creating rows, and remember that `_navigate_to_related_value()` only reloads if the table combo's selection really changes.
 - **Never assume production data.** `Musi.db` changes as it is used (a report that had rows can become empty). Create synthetic rows with an unmistakable prefix such as `Zzz`, assert on those, and delete them in `finally`. Assert before/after differences, not absolute counts.
@@ -379,7 +416,7 @@ Tests cover the repository, CRUD, validation, composite keys, transactions, fore
 - **Qt items.** Read what you need from a `QTableWidgetItem` before triggering anything that rebuilds the table; the item is deleted by the rebuild.
 - Running the tests changes `Musi.db` and `Musi_crud_test.db` slightly. Restore them with `git checkout -- Musi.db tests/Musi_crud_test.db` before committing, and add files to git by name.
 
-## 22. Development Workflow
+## 23. Development Workflow
 
 A safe development cycle is:
 
@@ -395,7 +432,7 @@ A safe development cycle is:
 
 Keeping commits aligned with completed, passing milestones makes regressions easier to identify.
 
-## 23. Rules for Future Development
+## 24. Rules for Future Development
 
 ### Do not bypass `DatabaseManager`
 Do not introduce independent `sqlite3.connect(...)` calls in application code.
@@ -412,7 +449,7 @@ Use schema and relationship metadata rather than scattering table structure thro
 ### Keep UI database-agnostic
 The UI should ask services to perform application operations rather than constructing SQL.
 
-## 24. State of `main.py`
+## 25. State of `main.py`
 
 The goal set out earlier has been reached: `main.py` contains no SQL. Every table load, save and delete goes through `Repository`; related records go through `core.relationships` and `core.relationship_operations`; behavior with rules (schedules, Discogs, reports, search, import) goes through a service. What `main.py` still asks of `DatabaseManager` is schema metadata only (`columns()`, `primary_key()`).
 
@@ -438,7 +475,7 @@ Known loose ends:
 - `core/settings.py` exists and is tested but nothing uses it yet.
 - Not every Qt dialog path is covered by tests.
 
-## 25. Adding a New Entity
+## 26. Adding a New Entity
 
 Preferred sequence:
 
@@ -452,7 +489,7 @@ Preferred sequence:
 8. Run `pytest -q`.
 9. Wire the UI only after the infrastructure tests pass.
 
-## 26. Database Architecture at a Glance
+## 27. Database Architecture at a Glance
 
 ```text
                          APPLICATION
@@ -490,7 +527,7 @@ Preferred sequence:
                  SQLite
 ```
 
-## 27. Final Architectural Principle
+## 28. Final Architectural Principle
 
 > **Application behavior belongs above the database infrastructure; database mechanics belong below it.**
 

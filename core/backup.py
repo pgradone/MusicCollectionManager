@@ -1,5 +1,11 @@
 """
 Automatic database backup.
+
+This copies the database FILE. That is right for SQLite (and for a
+file-based Access database), provided nothing has it open, which
+main.run_startup_tasks() guarantees by running before the window
+exists. A database server such as Oracle cannot be backed up by
+copying a file; that would need its own backup method.
 """
 
 
